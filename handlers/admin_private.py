@@ -85,7 +85,7 @@ async def back_step_handler(message: types.Message, state: FSMContext) -> None:
     current_state = await state.get_state()
 
     if current_state == AddProduct.name:
-        await message.answer('Предидущего шага нет, или введите название товара или напишите "отмена"')
+        await message.answer('Предыдущего шага нет, или введите название товара или напишите "отмена"')
         return
 
     previous = None
@@ -164,4 +164,4 @@ async def add_image(message: types.Message, state: FSMContext):
 
 @admin_router.message(AddProduct.image)
 async def add_image2(message: types.Message, state: FSMContext):
-    await message.answer("Отправьте фото пищи")
+    await message.answer("Отправьте фото товара")
