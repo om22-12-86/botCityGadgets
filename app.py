@@ -27,6 +27,4 @@ async def main():
     await bot.set_my_commands(commands=private, scope=types.BotCommandScopeAllPrivateChats())
     await dp.start_polling(bot, allowed_updates=ALLOWED_UPDATES)
 
-
-if __name__ == '__main__':
-    asyncio.run(main())
+asyncio.run(main())
