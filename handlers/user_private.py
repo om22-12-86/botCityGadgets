@@ -39,7 +39,7 @@ async def menu_cmd(message: types.Message):
 @user_private_router.message(F.text.lower() == "о магазине")
 @user_private_router.message(Command("about"))
 async def about_cmd(message: types.Message):
-    await message.answer("О магазине:")
+    await message.answer("О нас:")
 
 
 @user_private_router.message(F.text.lower() == "варианты оплаты")

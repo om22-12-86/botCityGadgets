@@ -17,7 +17,7 @@ def get_keyboard(
             "О магазине",
             "Варианты оплаты",
             "Варианты доставки",
-            "Отправить номер телефона"
+            "Отправить номер телефона",
             placeholder="Что вас интересует?",
             request_contact=4,
             sizes=(2, 2, 1)
@@ -33,7 +33,6 @@ def get_keyboard(
         elif request_location and request_location == index:
             keyboard.add(KeyboardButton(text=text, request_location=True))
         else:
-
             keyboard.add(KeyboardButton(text=text))
 
     return keyboard.adjust(*sizes).as_markup(
