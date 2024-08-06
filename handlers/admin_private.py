@@ -54,14 +54,13 @@ async def starring_at_product(callback: types.CallbackQuery, session: AsyncSessi
         await callback.message.answer_photo(
             product.image,
             caption=f"<b>{product.name}\
-                    </b>\n{product.description}\nСтоимость: {round(product.price, 2)}",
+                    </b>\n{product.description}\nСтоимость: {round(product.price, 2)}", parse_mode='HTML',
             reply_markup=get_callback_btns(
                 btns={
                     "Удалить": f"delete_{product.id}",
                     "Изменить": f"change_{product.id}",
                 },
-                sizes=(2,),
-                parse_mode='HTML'
+                sizes=(2,)
             ),
         )
     await callback.answer()
@@ -297,7 +296,7 @@ async def add_image(message: types.Message, state: FSMContext, session: AsyncSes
     elif message.photo:
         await state.update_data(image=message.photo[-1].file_id)
     else:
-        await message.answer("Отправьте фото")
+        await message.answer("Отправьте фото ")
         return
     data = await state.get_data()
     try:
