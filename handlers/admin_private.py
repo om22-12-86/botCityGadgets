@@ -14,6 +14,7 @@ from database.orm_query import (
     orm_get_product,
     orm_get_products,
     orm_update_product,
+    orm_get_products_by_keywords,
 )
 
 from filters.chat_types import ChatTypeFilter, IsAdmin
@@ -31,7 +32,9 @@ ADMIN_KB = get_keyboard(
     sizes=(2,),
 )
 
-
+# FSM для поиска товаров
+class AdminSearchProduct(StatesGroup):
+    keywords = State()
 @admin_router.message(Command("admin"))
 async def admin_features(message: types.Message):
     await message.answer("Что хотите сделать?", reply_markup=ADMIN_KB)
@@ -41,7 +44,10 @@ async def admin_features(message: types.Message):
 async def show_products(message: types.Message, session: AsyncSession):
     categories = await orm_get_categories(session)
     btns = {category.name: f'category_{category.id}' for category in categories}
-    await message.answer("Выберите категорию", reply_markup=get_callback_btns(btns=btns))
+    # Добавляем кнопку "Поиск"
+    btns["Поиск"] = 'admin_search'
+    await message.answer("Выберите категорию или выполните поиск", reply_markup=get_callback_btns(btns=btns))
+
 
 
 # Отображение товаров в категории с указанием количества на складе
@@ -300,3 +306,37 @@ async def add_stock(message: types.Message, state: FSMContext, session: AsyncSes
     except ValueError:
         await message.answer("Введите корректное числовое значение количества.")
 
+
+# Обработка нажатия кнопки "Поиск" в ассортименте
+@admin_router.callback_query(F.data == 'admin_search')
+async def admin_start_search(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введите ключевые слова для поиска:")
+    await state.set_state(AdminSearchProduct.keywords)
+
+# Обработка ввода ключевых слов для поиска
+@admin_router.message(AdminSearchProduct.keywords, F.text)
+async def admin_search_products(message: types.Message, session: AsyncSession, state: FSMContext):
+    search_query = message.text.strip()
+    products = await orm_get_products_by_keywords(session, search_query)
+    if not products:
+        await message.answer("Товары не найдены.")
+        return
+
+    for product in products:
+        await message.answer_photo(
+            product.image,
+            caption=f"<b>{product.name}</b>\n"
+                    f"{product.description}\n"
+                    f"Стоимость: {round(product.price, 2)}\n"
+                    f"В наличии: {product.stock} шт.",
+            parse_mode='HTML',
+            reply_markup=get_callback_btns(
+                btns={
+                    "Удалить": f"delete_{product.id}",
+                    "Изменить": f"change_{product.id}",
+                },
+                sizes=(2,)
+            )
+        )
+
+    await state.clear()  # Очищаем состояние после завершения поиска

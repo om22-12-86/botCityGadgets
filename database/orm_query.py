@@ -1,3 +1,4 @@
+from sqlalchemy import or_
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
@@ -188,3 +189,16 @@ async def orm_reduce_product_in_cart(session: AsyncSession, user_id: int, produc
             await session.commit()
 
         return False
+
+
+async def orm_get_products_by_keywords(session: AsyncSession, keywords: str):
+    from sqlalchemy import or_
+    keyword_list = keywords.split()
+    query = select(Product).where(
+        or_(
+            *[Product.name.ilike(f"%{keyword}%") for keyword in keyword_list],
+            *[Product.description.ilike(f"%{keyword}%") for keyword in keyword_list]
+        )
+    )
+    result = await session.execute(query)
+    return result.scalars().all()

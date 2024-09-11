@@ -1,5 +1,7 @@
 from aiogram import F, types, Router
 from aiogram.filters import CommandStart
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.orm_query import orm_add_to_cart, orm_add_user
 from filters.chat_types import ChatTypeFilter
@@ -96,3 +98,53 @@ async def user_menu(callback: types.CallbackQuery, callback_data: MenuCallBack, 
     else:
         # Если содержимое не изменилось, просто уведомляем пользователя
         await callback.answer("Сообщение не изменилось.")
+
+
+
+# FSM для поиска товаров
+class SearchProduct(StatesGroup):
+    keywords = State()
+
+
+# Обработчик команды /start
+@user_private_router.message(CommandStart())
+async def start_cmd(message: types.Message, session: AsyncSession):
+    # Получаем основное меню из функции get_menu_content
+    media, reply_markup = await get_menu_content(session, level=0, menu_name="main")
+    await message.answer_photo(media.media, caption=media.caption, reply_markup=reply_markup)
+
+
+# Добавление кнопки "Поиск" в главное меню
+@user_private_router.message(F.text == "Поиск")
+async def start_search(message: types.Message, state: FSMContext):
+    await message.answer("Введите ключевые слова для поиска:")
+    await state.set_state(SearchProduct.keywords)  # Переход в состояние ожидания ключевых слов
+
+
+# Обработка ввода ключевых слов для поиска
+@user_private_router.message(SearchProduct.keywords, F.text)
+async def search_products(message: types.Message, session: AsyncSession, state: FSMContext):
+    search_query = message.text.strip()
+    products = await orm_get_products_by_keywords(session, search_query)
+    if not products:
+        await message.answer("Товары не найдены.")
+        return
+
+    for product in products:
+        await message.answer_photo(
+            product.image,
+            caption=f"<b>{product.name}</b>\n"
+                    f"{product.description}\n"
+                    f"Стоимость: {round(product.price, 2)}\n"
+                    f"В наличии: {product.stock} шт.",
+            parse_mode='HTML',
+            reply_markup=get_products_btns(
+                level=1,
+                category=2,
+                page=1,
+                pagination_btns={'next': 'Следующий', 'previous': 'Назад'},
+                product_id=product.id
+            )
+        )
+
+    await state.clear()  # Очищаем состояние после завершения поиска
