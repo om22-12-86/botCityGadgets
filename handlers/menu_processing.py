@@ -36,9 +36,19 @@ async def main_menu(session: AsyncSession, level: int, menu_name: str):
 async def catalog(session: AsyncSession, level: int, menu_name: str):
     banner = await orm_get_banner(session, menu_name)
     image = InputMediaPhoto(media=banner.image, caption=banner.description)
+
     categories = await orm_get_categories(session)
+
+    if not categories:
+        print(f"No categories found for menu: {menu_name}")
+        # Если нет категорий, отправьте сообщение пользователю
+        return image, InlineKeyboardMarkup().add(
+            InlineKeyboardButton(text="Категории отсутствуют", callback_data="no_categories"))
+
+    # Если категории есть, создаём кнопки
     kbds = get_user_catalog_btns(level=level, categories=categories)
     return image, kbds
+
 
 
 # Функция для создания кнопок пагинации
@@ -76,6 +86,8 @@ async def products(session: AsyncSession, level: int, category: int, page: int):
         product_id=product.id,
     )
     return image, kbds
+
+
 
 
 # Функция для работы с корзиной товаров
@@ -131,6 +143,8 @@ async def carts(session: AsyncSession, level: int, menu_name: str, page: int, us
     return image, kbds
 
 
+
+
 # Основная функция для обработки меню
 async def get_menu_content(
         session: AsyncSession,
@@ -146,6 +160,10 @@ async def get_menu_content(
     elif level == 1:
         return await catalog(session, level, menu_name)
     elif level == 2:
+        # Проверка, что категория не None
+        if category is None:
+            print(f"category_id is None in get_menu_content for level {level}")
+            raise ValueError("category_id не может быть None")
         return await products(session, level, category, page)
     elif level == 3:
         return await carts(session, level, menu_name, page, user_id, product_id)

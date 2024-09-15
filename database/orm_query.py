@@ -37,7 +37,10 @@ async def orm_get_info_pages(session: AsyncSession):
 async def orm_get_categories(session: AsyncSession):
     query = select(Category)
     result = await session.execute(query)
-    return result.scalars().all()
+    categories = result.scalars().all()
+
+    # Убедитесь, что функция возвращает пустой список, а не None
+    return categories if categories else []
 
 
 async def orm_create_categories(session: AsyncSession, categories: list):
@@ -70,9 +73,16 @@ async def orm_add_product(session: AsyncSession, data: dict):
 
 
 async def orm_get_products(session: AsyncSession, category_id):
+    # Проверяем, что category_id не None
+    if category_id is None:
+        raise ValueError("category_id не может быть None")  # Выбрасываем ошибку, если category_id отсутствует
+
+    # Преобразуем category_id в int только если оно не None
     query = select(Product).where(Product.category_id == int(category_id))
     result = await session.execute(query)
     return result.scalars().all()
+
+
 
 
 async def orm_get_product(session: AsyncSession, product_id: int):
@@ -192,8 +202,13 @@ async def orm_reduce_product_in_cart(session: AsyncSession, user_id: int, produc
 
 
 async def orm_get_products_by_keywords(session: AsyncSession, keywords: str):
-    from sqlalchemy import or_
-    keyword_list = keywords.split()
+    """
+    Функция для поиска товаров по ключевым словам.
+    :param session: Асинхронная сессия для взаимодействия с базой данных
+    :param keywords: Ключевые слова для поиска
+    :return: Список товаров, соответствующих ключевым словам
+    """
+    keyword_list = keywords.split()  # Разбиваем ключевые слова на список
     query = select(Product).where(
         or_(
             *[Product.name.ilike(f"%{keyword}%") for keyword in keyword_list],

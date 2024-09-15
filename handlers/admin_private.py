@@ -35,6 +35,7 @@ ADMIN_KB = get_keyboard(
 # FSM для поиска товаров
 class AdminSearchProduct(StatesGroup):
     keywords = State()
+
 @admin_router.message(Command("admin"))
 async def admin_features(message: types.Message):
     await message.answer("Что хотите сделать?", reply_markup=ADMIN_KB)

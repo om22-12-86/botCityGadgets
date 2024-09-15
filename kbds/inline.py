@@ -1,5 +1,5 @@
 from aiogram.filters.callback_data import CallbackData
-from aiogram.types import InlineKeyboardButton
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
@@ -9,6 +9,17 @@ class MenuCallBack(CallbackData, prefix="menu"):
     category: int | None = None
     page: int = 1
     product_id: int | None = None
+
+def get_product_buttons(category_id, product_id):
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Назад", callback_data=f"category_{category_id}"),
+            InlineKeyboardButton(text="Купить", callback_data=f"buy_{product_id}")
+        ],
+        [
+            InlineKeyboardButton(text="Корзина", callback_data="cart_view")
+        ]
+    ])
 
 
 def get_user_main_btns(*, level: int, sizes: tuple[int] = (2,)):
@@ -37,17 +48,35 @@ def get_user_main_btns(*, level: int, sizes: tuple[int] = (2,)):
 def get_user_catalog_btns(*, level: int, categories: list, sizes: tuple[int] = (2,)):
     keyboard = InlineKeyboardBuilder()
 
+    # Цикл для добавления кнопок с категориями товаров
+    for c in categories:
+        keyboard.add(InlineKeyboardButton(
+            text=c.name,
+            callback_data=MenuCallBack(level=level + 1, menu_name=c.name,
+                                       category=c.id).pack()))  # Здесь c.id должно быть корректным
+
+
+    # Кнопки назад и корзина
     keyboard.add(InlineKeyboardButton(text='Назад',
                                       callback_data=MenuCallBack(level=level - 1, menu_name='main').pack()))
     keyboard.add(InlineKeyboardButton(text='Корзина 🛒',
                                       callback_data=MenuCallBack(level=3, menu_name='cart').pack()))
+    # Кнопка поиска товаров
+    keyboard.add(InlineKeyboardButton(text='Поиск 🔍',
+                                      callback_data=MenuCallBack(level=level + 1, menu_name='search_products').pack()))
 
-    for c in categories:
-        keyboard.add(InlineKeyboardButton(text=c.name,
-                                          callback_data=MenuCallBack(level=level + 1, menu_name=c.name,
-                                                                     category=c.id).pack()))
 
     return keyboard.adjust(*sizes).as_markup()
+# Функция для создания кнопок "Назад", "Корзина", "Купить"
+def get_user_products_btns(product_id: int):
+    keyboard = InlineKeyboardBuilder()
+
+    # Добавляем кнопки "Назад", "Корзина" и "Купить"
+    keyboard.add(InlineKeyboardButton(text='Назад', callback_data='go_back'))
+    keyboard.add(InlineKeyboardButton(text='Корзина 🛒', callback_data='cart'))
+    keyboard.add(InlineKeyboardButton(text='Купить 💵', callback_data=f'buy_{product_id}'))
+
+    return keyboard.adjust(1).as_markup()
 
 
 def get_products_btns(
@@ -140,6 +169,29 @@ def get_user_cart(
                                  callback_data=MenuCallBack(level=0, menu_name='main').pack()))
 
         return keyboard.adjust(*sizes).as_markup()
+
+# Функция для создания кнопок "Назад", "Корзина", "Купить"
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+def get_product_buttons(category_id: int, product_id: int):
+    """
+    Функция для создания клавиатуры с кнопками для продукта.
+    :param category_id: ID категории, из которой был выбран товар
+    :param product_id: ID продукта
+    :return: InlineKeyboardMarkup с кнопками
+    """
+    keyboard = []
+
+    # Кнопка "Главное меню"
+    keyboard.append([InlineKeyboardButton(text="Главное меню", callback_data="main_menu")])
+
+    # Добавляем кнопки "Корзина" и "Купить"
+    keyboard.append([InlineKeyboardButton(text="Корзина 🛒", callback_data="cart_view")])
+    keyboard.append([InlineKeyboardButton(text="Купить 💵", callback_data=f"buy_{product_id}")])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+
 
 
 def get_callback_btns(*, btns: dict[str, str], sizes: tuple[int] = (2,)):
