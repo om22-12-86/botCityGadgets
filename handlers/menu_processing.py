@@ -71,7 +71,7 @@ async def products(session: AsyncSession, level: int, category: int, page: int):
         media=product.image,
         caption=f"<b>{product.name}</b>\n"
                 f"{product.description}\n"
-                f"Стоимость: {round(product.price, 2)}\n"
+                f"Стоимость: {round(product.price, 2)}₽\n"
                 f"В наличии: {product.stock} шт.\n"  # Отображаем количество товара на складе
                 f"<b>Товар {paginator.page} из {paginator.pages}</b>",
         parse_mode='HTML'
@@ -127,9 +127,9 @@ async def carts(session: AsyncSession, level: int, menu_name: str, page: int, us
         image = InputMediaPhoto(
             media=cart.product.image,
             caption=f"<b>{cart.product.name}</b>\n"
-                    f"{cart.product.price}$ x {cart.quantity} = {cart_price}$\n"
+                    f"{cart.product.price}₽ x {cart.quantity} = {cart_price}₽\n"
                     f"Товар {paginator.page} из {paginator.pages} в корзине.\n"
-                    f"Общая стоимость товаров в корзине {total_price}$",
+                    f"Общая стоимость товаров в корзине {total_price}₽",
             parse_mode='HTML'
         )
 
