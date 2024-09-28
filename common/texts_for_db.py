@@ -5,7 +5,7 @@ categories = ['UAG', 'UNIQ', 'SATECHI', 'SAMSUNG', 'PITAKA', 'NOMAD', 'KARL LAGE
 
 description_for_info_pages = {
     "main": "Добро пожаловать!",
-    "about": "CITY_GADGETS \nРежим работы - 10:00 - 19:00.",
+    "about": "CITY_GADGETS \n Режим работы - 10:00 - 19:00.",
     "payment": as_marked_section(
         Bold("Варианты оплаты:", parse_mode='HTML'),
         "При получении кеш",

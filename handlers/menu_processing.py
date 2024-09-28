@@ -1,5 +1,6 @@
 from aiogram.types import InputMediaPhoto
 from sqlalchemy.ext.asyncio import AsyncSession
+import requests
 
 # Импортируем необходимые функции для работы с базой данных из orm_query
 from database.orm_query import (
@@ -71,7 +72,7 @@ async def products(session: AsyncSession, level: int, category: int, page: int):
         media=product.image,
         caption=f"<b>{product.name}</b>\n"
                 f"{product.description}\n"
-                f"Стоимость: {round(product.price, 2)}₽\n"
+                f"Стоимость: {round(product.price, 2)} ₽\n"
                 f"В наличии: {product.stock} шт.\n"  # Отображаем количество товара на складе
                 f"<b>Товар {paginator.page} из {paginator.pages}</b>",
         parse_mode='HTML'
@@ -91,6 +92,8 @@ async def products(session: AsyncSession, level: int, category: int, page: int):
 
 
 # Функция для работы с корзиной товаров
+# admin_private.py
+
 async def carts(session: AsyncSession, level: int, menu_name: str, page: int, user_id: int, product_id: int | None):
     # Действия при удалении товара из корзины
     if menu_name == "delete":
@@ -99,12 +102,15 @@ async def carts(session: AsyncSession, level: int, menu_name: str, page: int, us
             page -= 1
     # Действия при уменьшении количества товара
     elif menu_name == "decrement":
-        is_cart = await orm_reduce_product_in_cart(session, user_id, product_id)
-        if page > 1 and not is_cart:
+        await orm_reduce_product_in_cart(session, user_id, product_id)
+        if page > 1:
             page -= 1
     # Действия при увеличении количества товара
     elif menu_name == "increment":
-        await orm_add_to_cart(session, user_id, product_id)
+        added = await orm_add_to_cart(session, user_id, product_id)
+        if not added:
+            # Отправить сообщение о том, что товара недостаточно
+            print(f"Недостаточно товара на складе для продукта ID: {product_id}")
 
     # Получаем корзину пользователя
     carts = await orm_get_user_carts(session, user_id)
@@ -119,15 +125,15 @@ async def carts(session: AsyncSession, level: int, menu_name: str, page: int, us
         paginator = Paginator(carts, page=page)
         cart = paginator.get_page()[0]
 
-        cart_price = round(cart.quantity * cart.product.price, 2)
+        cart_price = round(cart.stock * cart.product.price, 2)
         total_price = round(
-            sum(cart.quantity * cart.product.price for cart in carts), 2
+            sum(cart.stock * cart.product.price for cart in carts), 2
         )
 
         image = InputMediaPhoto(
             media=cart.product.image,
             caption=f"<b>{cart.product.name}</b>\n"
-                    f"{cart.product.price}₽ x {cart.quantity} = {cart_price}₽\n"
+                    f"{cart.product.price}₽ x {cart.stock} = {cart_price}₽\n"
                     f"Товар {paginator.page} из {paginator.pages} в корзине.\n"
                     f"Общая стоимость товаров в корзине {total_price}₽",
             parse_mode='HTML'
@@ -141,6 +147,7 @@ async def carts(session: AsyncSession, level: int, menu_name: str, page: int, us
             product_id=cart.product.id,
         )
     return image, kbds
+
 
 
 

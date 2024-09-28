@@ -60,7 +60,7 @@ async def orm_add_product(session: AsyncSession, data: dict):
             price=float(data["price"]),
             image=data["image"],
             category_id=int(data["category"]),
-            stock=int(data["stock"])  # Используем поле stock вместо quantity
+            stock=int(data["stock"])
         )
         session.add(obj)
         await session.commit()
@@ -72,8 +72,7 @@ async def orm_add_product(session: AsyncSession, data: dict):
 
 
 
-async def orm_get_products(session: AsyncSession, category_id):
-    # Проверяем, что category_id не None
+async def orm_get_products(session: AsyncSession, category_id: int):    # Проверяем, что category_id не None
     if category_id is None:
         raise ValueError("category_id не может быть None")  # Выбрасываем ошибку, если category_id отсутствует
 
@@ -101,7 +100,7 @@ async def orm_update_product(session: AsyncSession, product_id: int, data: dict)
             price=float(data["price"]),
             image=data["image"],
             category_id=int(data["category"]),
-            stock=int(data["stock"])  # Используем поле stock вместо quantity
+            stock=int(data["stock"])
         )
     )
     await session.execute(query)
@@ -137,14 +136,14 @@ async def orm_add_to_cart(session: AsyncSession, user_id: int, product_id: int):
     cart = cart.scalar()
 
     if cart:
-        if cart.quantity < product.stock:
-            cart.quantity += 1
+        if cart.stock < product.stock:
+            cart.stock += 1
             await session.commit()
             return cart
         else:
             return None  # Превышено количество товара на складе
     else:
-        cart = Cart(user_id=user_id, product_id=product_id, quantity=1)  # Создаем новую корзину
+        cart = Cart(user_id=user_id, product_id=product_id, stock=1)  # Создаем новую корзину
         session.add(cart)
 
     product.stock -= 1  # Уменьшаем количество товара на складе
@@ -173,8 +172,8 @@ async def orm_reduce_product_in_cart(session: AsyncSession, user_id: int, produc
     if not cart:
         return
 
-    if cart.quantity > 1:
-        cart.quantity -= 1
+    if cart.stock > 1:
+        cart.stock -= 1
         await session.commit()
 
         # Увеличиваем количество товара на складе
@@ -217,3 +216,4 @@ async def orm_get_products_by_keywords(session: AsyncSession, keywords: str):
     )
     result = await session.execute(query)
     return result.scalars().all()
+

@@ -3,7 +3,7 @@ from aiogram.filters import CommandStart
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
-from database.orm_query import orm_add_to_cart, orm_add_user, orm_get_products_by_keywords
+from database.orm_query import orm_add_to_cart, orm_add_user, orm_get_products_by_keywords, orm_get_products
 from filters.chat_types import ChatTypeFilter
 from handlers.menu_processing import get_menu_content, carts# Импортируем функции
 from kbds.inline import MenuCallBack, get_product_buttons, get_user_products_btns

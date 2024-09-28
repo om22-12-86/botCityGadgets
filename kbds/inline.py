@@ -18,7 +18,7 @@ def get_product_buttons(category_id, product_id):
             InlineKeyboardButton(text="Купить", callback_data=f"buy_{product_id}")
         ],
         [
-            InlineKeyboardButton(text="Корзина", callback_data="cart_view")
+            InlineKeyboardButton(text="Корзина", callback_data="cart")
         ]
     ])
 
@@ -172,25 +172,25 @@ def get_user_cart(
         return keyboard.adjust(*sizes).as_markup()
 
 # Функция для создания кнопок "Назад", "Корзина", "Купить"
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
-def get_product_buttons(category_id: int, product_id: int):
-    """
-    Функция для создания клавиатуры с кнопками для продукта.
-    :param category_id: ID категории, из которой был выбран товар
-    :param product_id: ID продукта
-    :return: InlineKeyboardMarkup с кнопками
-    """
-    keyboard = []
-
-    # Кнопка "Главное меню"
-    keyboard.append([InlineKeyboardButton(text="Главное меню", callback_data="main_menu")])
-
-    # Добавляем кнопки "Корзина" и "Купить"
-    keyboard.append([InlineKeyboardButton(text="Корзина 🛒", callback_data="cart_view")])
-    keyboard.append([InlineKeyboardButton(text="Купить 💵", callback_data=f"buy_{product_id}")])
-
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+# from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+#
+# def get_product_buttons(category_id: int, product_id: int):
+#     """
+#     Функция для создания клавиатуры с кнопками для продукта.
+#     :param category_id: ID категории, из которой был выбран товар
+#     :param product_id: ID продукта
+#     :return: InlineKeyboardMarkup с кнопками
+#     """
+#     keyboard = []
+#
+#     # Кнопка "Главное меню"
+#     keyboard.append([InlineKeyboardButton(text="Главное меню", callback_data="main_menu")])
+#
+#     # Добавляем кнопки "Корзина" и "Купить"
+#     keyboard.append([InlineKeyboardButton(text="Корзина 🛒", callback_data="cart_view")])
+#     keyboard.append([InlineKeyboardButton(text="Купить 💵", callback_data=f"buy_{product_id}")])
+#
+#     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 
 

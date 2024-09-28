@@ -55,6 +55,7 @@ async def show_products(message: types.Message, session: AsyncSession):
 @admin_router.callback_query(F.data.startswith('category_'))
 async def show_category_products(callback: types.CallbackQuery, session: AsyncSession):
     category_id = callback.data.split('_')[-1]
+    print(f"Selected category ID: {category_id}")
     products = await orm_get_products(session, int(category_id))
     for product in products:
         # Добавляем отображение количества товара на складе
@@ -128,7 +129,7 @@ class AddProduct(StatesGroup):
     category = State()
     price = State()
     image = State()
-    stock = State()  # изменено с quantity на stock
+    stock = State()
 
     product_for_change = None
 
@@ -138,7 +139,7 @@ class AddProduct(StatesGroup):
         "AddProduct:category": "Выберите категорию заново ⬆️",
         "AddProduct:price": "Введите стоимость заново:",
         "AddProduct:image": "Этот стейт последний, поэтому...",
-        "AddProduct:stock": "Введите количество товара:",  # изменено с quantity на stock
+        "AddProduct:stock": "Введите количество товара:",
     }
 
 
@@ -328,7 +329,7 @@ async def admin_search_products(message: types.Message, session: AsyncSession, s
             product.image,
             caption=f"<b>{product.name}</b>\n"
                     f"{product.description}\n"
-                    f"Стоимость: {round(product.price, 2)}\n"
+                    f"Стоимость: {round(product.price, 2)} ₽\n"
                     f"В наличии: {product.stock} шт.",
             parse_mode='HTML',
             reply_markup=get_callback_btns(
