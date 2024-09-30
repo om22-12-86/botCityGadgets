@@ -16,14 +16,31 @@ class Banner(Base):
     updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
 
-class Category(Base):
-    __tablename__ = 'category'
+from sqlalchemy import String, Text, DateTime, func
+from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.ext.declarative import declarative_base
 
+Base = declarative_base()
+
+class Category(Base):
+    __tablename__ = 'category'  # Название таблицы в базе данных
+
+    # Уникальный идентификатор категории, автоинкрементируемый
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+
+    # Название категории, обязательное поле
     name: Mapped[str] = mapped_column(String(150), nullable=False)
+
+    # Дата и время создания записи, по умолчанию текущее время
     created: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
+
+    # Дата и время последнего обновления записи, обновляется при изменении
     updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+
+    # Описание категории, поле может быть пустым
     description: Mapped[str] = mapped_column(Text)
+
+
 
 class Product(Base):
     __tablename__ = 'product'
@@ -34,7 +51,7 @@ class Product(Base):
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     image: Mapped[str] = mapped_column(String(150))
     category_id: Mapped[int] = mapped_column(ForeignKey('category.id', ondelete='CASCADE'), nullable=False)
-    stock: Mapped[int] = mapped_column(Integer, default=0)  # Поле stock вместо quantity
+    stock: Mapped[int] = mapped_column(Integer, default=0)
     is_available: Mapped[bool] = mapped_column(Boolean, default=True)
     created: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
     updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
