@@ -70,16 +70,16 @@ class User(Base):
     created: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
     updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
-
 class Cart(Base):
     __tablename__ = 'cart'
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey('user.id', ondelete='CASCADE'), nullable=False)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('user.user_id', ondelete='CASCADE'), nullable=False)
     product_id: Mapped[int] = mapped_column(ForeignKey('product.id', ondelete='CASCADE'), nullable=False)
     stock: Mapped[int] = mapped_column(Integer, default=1)
     created: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
     updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
-    user: Mapped['User'] = relationship(backref='cart')
-    product: Mapped['Product'] = relationship(backref='cart')
+    user: Mapped['User'] = relationship('User', backref='cart')
+    product: Mapped['Product'] = relationship('Product', backref='cart')
+

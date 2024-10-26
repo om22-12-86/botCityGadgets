@@ -11,16 +11,12 @@ class MenuCallBack(CallbackData, prefix="menu"):
     page: int = 1
     product_id: int | None = None
 
+# Обновленная функция для создания кнопок удаления и изменения товара
 def get_product_buttons(category_id, product_id):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [
-            InlineKeyboardButton(text="Назад", callback_data=f"category_{category_id}"),
-            InlineKeyboardButton(text="Купить", callback_data=f"buy_{product_id}")
-        ],
-        [
-            InlineKeyboardButton(text="Корзина", callback_data="cart")
-        ]
-    ])
+    keyboard = InlineKeyboardBuilder()
+    keyboard.add(InlineKeyboardButton(text="Удалить", callback_data=f"delete_{product_id}"))
+    keyboard.add(InlineKeyboardButton(text="Изменить", callback_data=f"change_{product_id}"))
+    return keyboard.adjust(2).as_markup()
 
 
 def get_user_main_btns(*, level: int, sizes: tuple[int] = (2,)):
@@ -70,13 +66,31 @@ def get_user_catalog_btns(*, level: int, categories: list, sizes: tuple[int] = (
     return keyboard.adjust(*sizes).as_markup()
 
 # Функция для создания кнопок для найденных товаров
-def get_user_products_btns(product_id: int):
-    keyboard = types.InlineKeyboardMarkup(inline_keyboard=[
-        [types.InlineKeyboardButton(text='Поиск 🔍', callback_data='search')],
-        [types.InlineKeyboardButton(text='Купить 💵', callback_data=f'buy_{product_id}')],
-        [types.InlineKeyboardButton(text='Главное меню 🏠', callback_data='main_menu')]
-    ])
-    return keyboard
+def get_user_products_btns(product_id: int, level: int = 2, sizes=(2, 1)):
+    keyboard = InlineKeyboardBuilder()
+
+    # Добавляем кнопку "Назад"
+    keyboard.add(InlineKeyboardButton(
+        text="Назад",
+        callback_data=MenuCallBack(level=level - 1, menu_name="catalog").pack()
+    ))
+
+    # Добавляем кнопку "Корзина"
+    keyboard.add(InlineKeyboardButton(
+        text="Корзина 🛒",
+        callback_data=MenuCallBack(level=3, menu_name="cart").pack()
+    ))
+
+    # Добавляем кнопку "Купить"
+    keyboard.add(InlineKeyboardButton(
+        text="Купить 💵",
+        callback_data=MenuCallBack(level=level, menu_name="add_to_cart", product_id=product_id).pack()
+    ))
+
+    # Устанавливаем размеры кнопок
+    keyboard.adjust(*sizes)
+
+    return keyboard.as_markup()
 
 
 

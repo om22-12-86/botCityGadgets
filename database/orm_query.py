@@ -2,6 +2,7 @@ from sqlalchemy import or_
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
+from sqlalchemy.exc import IntegrityError
 
 from database.models import Banner, Cart, Category, Product, User
 
@@ -113,39 +114,78 @@ async def orm_delete_product(session: AsyncSession, product_id: int):
     await session.commit()
 
 # Работа с пользователями
-async def orm_add_user(session: AsyncSession, user_id: int, first_name: str | None = None, last_name: str | None = None, phone: str | None = None):
-    query = select(User).where(User.user_id == user_id)
-    result = await session.execute(query)
-    if result.first() is None:
-        session.add(User(user_id=user_id, first_name=first_name, last_name=last_name, phone=phone))
+async def orm_add_user(session: AsyncSession, user_id: int, first_name: str = None, last_name: str = None, phone: str = None):
+    # Проверка существования пользователя
+    existing_user = await session.execute(select(User).where(User.user_id == user_id))
+    if not existing_user.scalar():
+        # Добавляем пользователя, если его еще нет
+        user = User(user_id=user_id, first_name=first_name, last_name=last_name, phone=phone)
+        session.add(user)
         await session.commit()
+
+
 
 # Работа с корзинами
 async def orm_add_to_cart(session: AsyncSession, user_id: int, product_id: int):
+    # Проверяем, существует ли пользователь в базе данных
+    user_query = select(User).where(User.user_id == user_id)
+    user = (await session.execute(user_query)).scalar()
+
+    # Если пользователя нет, добавляем его
+    if not user:
+        session.add(User(user_id=user_id))
+        try:
+            await session.commit()  # Сохраняем изменения для пользователя
+            print("Пользователь успешно добавлен.")
+            user = (await session.execute(user_query)).scalar()  # Повторная проверка
+        except IntegrityError as e:
+            await session.rollback()
+            print(f"Ошибка при добавлении пользователя: {e}")
+            return None
+
+    if not user:
+        print("Ошибка: пользователь не добавлен в базу данных.")
+        return None
+
+    # Проверка наличия продукта на складе
     product_query = select(Product).where(Product.id == product_id)
-    product = await session.execute(product_query)
-    product = product.scalar()
+    product = (await session.execute(product_query)).scalar()
 
-    if not product or product.stock <= 0:
-        return None  # Товар не доступен для добавления в корзину
+    if not product:
+        print("Товар не найден.")
+        return None
+    elif product.stock <= 0:
+        print("Товар недоступен для добавления в корзину.")
+        return None
 
-    # Проверяем, существует ли уже продукт в корзине
+    # Проверяем, есть ли товар в корзине пользователя
     cart_query = select(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id)
-    cart = await session.execute(cart_query)
-    cart = cart.scalar()
+    cart_item = (await session.execute(cart_query)).scalar()
 
-    if cart:
-        if cart.stock < product.stock:
-            cart.stock += 1
+    # Если товар уже есть в корзине, увеличиваем количество, иначе добавляем новый товар в корзину
+    if cart_item:
+        if cart_item.stock < product.stock:
+            cart_item.stock += 1
         else:
-            return None  # Превышено количество товара на складе
+            print("Недостаточно товара на складе.")
+            return None
     else:
-        cart = Cart(user_id=user_id, product_id=product_id, stock=1)  # Создаем новую корзину
-        session.add(cart)
+        # Добавляем новый товар в корзину
+        new_cart_item = Cart(user_id=user_id, product_id=product_id, stock=1)
+        session.add(new_cart_item)
 
-    product.stock -= 1  # Уменьшаем количество товара на складе
-    await session.commit()
-    return cart
+    # Уменьшаем количество товара на складе
+    product.stock -= 1
+    try:
+        await session.commit()
+        print("Товар успешно добавлен в корзину.")
+    except IntegrityError as e:
+        await session.rollback()
+        print(f"Ошибка при добавлении товара в корзину: {e}")
+        return None
+    return cart_item
+
+
 
 
 

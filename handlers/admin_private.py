@@ -50,32 +50,32 @@ async def show_products(message: types.Message, session: AsyncSession):
     await message.answer("Выберите категорию или выполните поиск", reply_markup=get_callback_btns(btns=btns))
 
 
-
-# Отображение товаров в категории с указанием количества на складе
+# Обработчик для показа товаров в категории
 @admin_router.callback_query(F.data.startswith('category_'))
 async def show_category_products(callback: types.CallbackQuery, session: AsyncSession):
     category_id = callback.data.split('_')[-1]
     print(f"Selected category ID: {category_id}")
+
+    # Получаем товары для выбранной категории
     products = await orm_get_products(session, int(category_id))
+
+    # Перебираем товары и отправляем информацию по каждому
     for product in products:
-        # Добавляем отображение количества товара на складе
         await callback.message.answer_photo(
             product.image,
-            caption=f"<b>{product.name}</b>\n"
-                    f"{product.description}\n"
-                    f"Стоимость: {round(product.price, 2)}\n"
-                    f"В наличии: {product.stock} шт.",  # Количество товара на складе
+            caption=f"<b>{product.name}</b>\n"  # Название
+                    f"{product.description}\n"  # Описание
+                    f"Стоимость: {round(product.price, 2)} ₽\n"  # Стоимость
+                    f"В наличии: {product.stock} шт.",  # Количество на складе
             parse_mode='HTML',
-            reply_markup=get_callback_btns(
-                btns={
-                    "Удалить": f"delete_{product.id}",
-                    "Изменить": f"change_{product.id}",
-                },
-                sizes=(2,)
-            ),
+            reply_markup=get_product_buttons(category_id, product.id)  # Передаем оба аргумента
         )
+
+    # Ожидание завершения всех сообщений
     await callback.answer()
     await callback.message.answer("ОК, вот список товаров ⏫")
+
+
 
 
 @admin_router.callback_query(F.data.startswith("delete_"))
