@@ -27,6 +27,12 @@ from utils.paginator import Paginator
 # Функция отображения главного меню
 async def main_menu(session: AsyncSession, level: int, menu_name: str):
     banner = await orm_get_banner(session, menu_name)
+
+    if not banner.image or not banner.description:
+        print(f"Баннер для '{menu_name}' не содержит изображение или описание. Используются стандартные значения.")
+        banner.image = "DEFAULT_IMAGE_URL"
+        banner.description = "Стандартное описание"
+
     image = InputMediaPhoto(media=banner.image, caption=banner.description)
     kbds = get_user_main_btns(level=level)
     return image, kbds

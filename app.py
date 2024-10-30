@@ -22,6 +22,7 @@ logging.basicConfig(level=logging.DEBUG)
 bot = Bot(token=os.getenv('TOKEN'))
 bot.my_admins_list = []
 
+
 # Инициализация диспетчера
 dp = Dispatcher()
 

@@ -1,9 +1,10 @@
-from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, BigInteger, func, Integer, Boolean
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text, BigInteger, func, Integer, Boolean, Float
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from datetime import datetime
+from sqlalchemy.sql import func
 
 class Base(DeclarativeBase):
     pass
-
 
 class Banner(Base):
     __tablename__ = 'banner'
@@ -16,30 +17,14 @@ class Banner(Base):
     updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
 
-from sqlalchemy import String, Text, DateTime, func
-from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy.ext.declarative import declarative_base
-
-Base = declarative_base()
-
 class Category(Base):
-    __tablename__ = 'category'  # Название таблицы в базе данных
+    __tablename__ = 'category'
 
-    # Уникальный идентификатор категории, автоинкрементируемый
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-
-    # Название категории, обязательное поле
     name: Mapped[str] = mapped_column(String(150), nullable=False)
-
-    # Дата и время создания записи, по умолчанию текущее время
     created: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
-
-    # Дата и время последнего обновления записи, обновляется при изменении
     updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
-
-    # Описание категории, поле может быть пустым
     description: Mapped[str] = mapped_column(Text)
-
 
 
 class Product(Base):
@@ -70,6 +55,10 @@ class User(Base):
     created: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
     updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
+    orders: Mapped[list["Order"]] = relationship("Order", back_populates="user")
+
+
+
 class Cart(Base):
     __tablename__ = 'cart'
 
@@ -83,3 +72,29 @@ class Cart(Base):
     user: Mapped['User'] = relationship('User', backref='cart')
     product: Mapped['Product'] = relationship('Product', backref='cart')
 
+
+class Order(Base):
+    __tablename__ = 'order'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('user.id'))
+    order_number: Mapped[str] = mapped_column(String, unique=True)
+    status: Mapped[str] = mapped_column(String, default='В обработке')
+    created: Mapped[DateTime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated: Mapped[DateTime] = mapped_column(DateTime, onupdate=datetime.utcnow)
+
+    user: Mapped["User"] = relationship("User", back_populates="orders")
+    items: Mapped[list["OrderItem"]] = relationship("OrderItem", back_populates="order")
+
+
+class OrderItem(Base):
+    __tablename__ = 'order_item'
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey('order.id'))
+    product_id: Mapped[int] = mapped_column(ForeignKey('product.id'))
+    quantity: Mapped[int] = mapped_column(Integer)
+    price: Mapped[float] = mapped_column(Float)
+
+    order: Mapped["Order"] = relationship("Order", back_populates="items")
+    product: Mapped["Product"] = relationship("Product")

@@ -6,6 +6,8 @@ from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.orm_query import (
+    update_order_status,
+    get_orders,
     orm_change_banner_image,
     orm_get_categories,
     orm_add_product,
@@ -24,10 +26,13 @@ from kbds.reply import get_keyboard
 admin_router = Router()
 admin_router.message.filter(ChatTypeFilter(["private"]), IsAdmin())
 
+# Клавиатура для меню администратора
 ADMIN_KB = get_keyboard(
     "Добавить товар",
     "Ассортимент",
     "Добавить/Изменить баннер",
+    "Заказы",               # Новая кнопка для работы с заказами
+    "Загрузить файл Excel",  # Новая кнопка для загрузки файла Excel
     placeholder="Выберите действие",
     sizes=(2,),
 )
@@ -103,11 +108,18 @@ async def add_image(message: types.Message, state: FSMContext, session: AsyncSes
 @admin_router.message(AddBanner.image, F.photo)
 async def save_banner_image(message: types.Message, state: FSMContext, session: AsyncSession):
     image_id = message.photo[-1].file_id
-    for_page = message.caption.strip()
+    for_page = message.caption.strip() if message.caption else None  # Проверка на наличие подписи
+
+    # Если подписи нет, уведомляем пользователя и возвращаемся
+    if not for_page:
+        await message.answer("Пожалуйста, укажите название страницы в описании к фото.")
+        return
+
     pages_names = [page.name for page in await orm_get_info_pages(session)]
     if for_page not in pages_names:
         await message.answer(f"Введите правильное название страницы, например:\n{', '.join(pages_names)}")
         return
+
     await orm_change_banner_image(session, for_page, image_id)
     await message.answer("Баннер добавлен/изменен.")
     await state.clear()
@@ -342,3 +354,143 @@ async def admin_search_products(message: types.Message, session: AsyncSession, s
         )
 
     await state.clear()  # Очищаем состояние после завершения поиска
+
+
+
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from database.orm_query import get_orders, update_order_status
+
+# Обработчик кнопки "Заказы"
+@admin_router.message(F.text == "Заказы")
+async def show_orders(message: types.Message, session: AsyncSession):
+    orders = await get_orders(session)
+    if not orders:
+        await message.answer("Пока нет заказов.")
+        return
+
+    for order in orders:
+        order_text = "\n".join([f"{item.product.name} - {item.quantity} шт." for item in order.items])
+        total = sum([item.quantity * item.price for item in order.items])
+
+        buttons = InlineKeyboardMarkup().add(
+            InlineKeyboardButton("Отмена", callback_data=f"order_cancel_{order.id}"),
+            InlineKeyboardButton("Готов", callback_data=f"order_ready_{order.id}"),
+            InlineKeyboardButton("Выдан", callback_data=f"order_issued_{order.id}")
+        )
+
+        await message.answer(
+            f"Заказ #{order.order_number}\nПользователь ID: {order.user_id}\nСтатус: {order.status}\nТовары:\n{order_text}\nСумма: {total} ₽",
+            reply_markup=buttons
+        )
+
+
+
+
+@admin_router.message(F.text == "Заказы")
+async def show_orders(message: types.Message, session: AsyncSession):
+    orders = await get_orders(session)
+    if not orders:
+        await message.answer("Пока нет заказов.")
+        return
+
+    for order in orders:
+        order_text = "\n".join(
+            [f"{item.product.name} - {item.quantity} шт." for item in order.items]
+        )
+        total = sum([item.quantity * item.price for item in order.items])
+
+        buttons = InlineKeyboardMarkup().add(
+            InlineKeyboardButton("Отмена", callback_data=f"order_cancel_{order.id}"),
+            InlineKeyboardButton("Готов", callback_data=f"order_ready_{order.id}"),
+            InlineKeyboardButton("Выдан", callback_data=f"order_issued_{order.id}")
+        )
+
+        await message.answer(
+            f"Заказ #{order.order_number}\n"
+            f"Пользователь ID: {order.user_id}\n"
+            f"Статус: {order.status}\n"
+            f"Товары:\n{order_text}\n"
+            f"Сумма: {total} ₽",
+            reply_markup=buttons
+        )
+
+# Обработчики статуса заказа у администратора
+@admin_router.callback_query(F.data.startswith("order_"))
+async def handle_order_action(callback: types.CallbackQuery, session: AsyncSession):
+    action, order_id = callback.data.split('_')[1], int(callback.data.split('_')[-1])
+    status_map = {
+        "cancel": "Отменен",
+        "ready": "Готов к получению",
+        "issued": "Выдан"
+    }
+    if action in status_map:
+        await update_order_status(session, order_id, status_map[action])
+        await callback.answer(f"Статус заказа обновлен: {status_map[action]}")
+
+        # Уведомление пользователя
+        if action == "cancel":
+            await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} отменен.")
+        elif action == "ready":
+            await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} готов к получению!")
+        elif action == "issued":
+            await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} выдан.")
+
+
+
+@admin_router.callback_query(F.data == "view_orders")
+async def view_orders(callback: types.CallbackQuery, session: AsyncSession):
+    orders = await get_orders(session)
+    if not orders:
+        await callback.message.answer("Нет текущих заказов.")
+        return
+
+    for order in orders:
+        order_text = "\n".join([f"{item.product.name} - {item.quantity} шт." for item in order.items])
+        total = sum([item.quantity * item.price for item in order.items])
+        await callback.message.answer(
+            f"Заказ #{order.order_number}\n"
+            f"Пользователь: {order.user_id}\n"
+            f"Товары:\n{order_text}\n"
+            f"Сумма: {total} ₽",
+            reply_markup=get_order_admin_buttons(order.id)
+        )
+
+
+
+
+@admin_router.callback_query(F.data.startswith("cancel_order_"))
+async def cancel_order(callback: types.CallbackQuery, session: AsyncSession):
+    order_id = int(callback.data.split("_")[-1])
+    await update_order_status(session, order_id, "Отменен")
+    await callback.message.answer("Заказ отменен.")
+    await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} отменен.")
+
+@admin_router.callback_query(F.data.startswith("ready_order_"))
+async def ready_order(callback: types.CallbackQuery, session: AsyncSession):
+    order_id = int(callback.data.split("_")[-1])
+    await update_order_status(session, order_id, "Готов")
+    await callback.message.answer("Заказ готов к получению.")
+    await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} готов к получению.")
+
+@admin_router.callback_query(F.data.startswith("delivered_order_"))
+async def delivered_order(callback: types.CallbackQuery, session: AsyncSession):
+    order_id = int(callback.data.split("_")[-1])
+    await update_order_status(session, order_id, "Выдан")
+    await callback.message.answer("Заказ выдан.")
+    await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} выдан.")
+
+
+# Обработчик для загрузки файла Excel
+@admin_router.message(F.text == "Загрузить файл Excel")
+async def prompt_for_excel_upload(message: types.Message):
+    await message.answer("Пожалуйста, отправьте файл Excel для загрузки.")
+
+
+@admin_router.message(F.document.file_name.endswith(".xls") | F.document.file_name.endswith(".xlsx"))
+async def handle_excel_upload(message: types.Message):
+    file_id = message.document.file_id
+    file = await bot.get_file(file_id)
+
+    # Загрузка файла на сервер для обработки
+    await file.download(destination=f"/path/to/upload/{message.document.file_name}")
+    await message.answer("Файл Excel успешно загружен и обработан.")

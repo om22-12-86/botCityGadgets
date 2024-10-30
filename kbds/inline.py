@@ -27,6 +27,7 @@ def get_user_main_btns(*, level: int, sizes: tuple[int] = (2,)):
         "О нас ℹ️": "about",
         "Оплата 💵": "payment",
         "Доставка 🚚": "shipping",
+        "Заказы 📝": "user_orders"  # Новая кнопка для отображения заказов
     }
     for text, menu_name in btns.items():
         if menu_name == 'catalog':
@@ -40,6 +41,7 @@ def get_user_main_btns(*, level: int, sizes: tuple[int] = (2,)):
                                               callback_data=MenuCallBack(level=level, menu_name=menu_name).pack()))
 
     return keyboard.adjust(*sizes).as_markup()
+
 
 
 def get_user_catalog_btns(*, level: int, categories: list, sizes: tuple[int] = (2,)):
@@ -184,6 +186,21 @@ def get_user_cart(
                                  callback_data=MenuCallBack(level=0, menu_name='main').pack()))
 
         return keyboard.adjust(*sizes).as_markup()
+
+def get_order_admin_buttons(order_id):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("Отмена", callback_data=f"cancel_order_{order_id}")],
+        [InlineKeyboardButton("Готов", callback_data=f"ready_order_{order_id}")],
+        [InlineKeyboardButton("Выдан", callback_data=f"delivered_order_{order_id}")]
+    ])
+    return keyboard
+
+def get_admin_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Заказы", callback_data="view_orders")],
+        # Другие кнопки
+    ])
+
 
 # Функция для создания кнопок "Назад", "Корзина", "Купить"
 # from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton

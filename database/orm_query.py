@@ -3,8 +3,8 @@ from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import IntegrityError
-
-from database.models import Banner, Cart, Category, Product, User
+import random
+from database.models import Banner, Cart, Category, Product, User, Order, OrderItem
 
 # Работа с баннерами (информационными страницами)
 async def orm_add_banner_description(session: AsyncSession, data: dict):
@@ -26,7 +26,12 @@ async def orm_change_banner_image(session: AsyncSession, name: str, image: str):
 async def orm_get_banner(session: AsyncSession, page: str):
     query = select(Banner).where(Banner.name == page)
     result = await session.execute(query)
-    return result.scalar()
+    banner = result.scalar()
+    # Если баннер не найден, возвращаем стандартный баннер
+    if not banner:
+        print(f"Баннер '{page}' не найден. Используется стандартный баннер.")
+        return Banner(image="DEFAULT_IMAGE_URL", description="Стандартное описание баннера")  # Укажите URL стандартного изображения
+    return banner
 
 
 async def orm_get_info_pages(session: AsyncSession):
@@ -254,3 +259,35 @@ async def orm_get_products_by_keywords(session: AsyncSession, keywords: str):
     )
     result = await session.execute(query)
     return result.scalars().all()
+
+
+
+async def create_order(session: AsyncSession, user_id: int, cart_items):
+    # Генерация уникального номера заказа из 7 символов
+    order_number = ''.join(random.choices('0123456789', k=7))
+    new_order = Order(user_id=user_id, order_number=order_number)
+    session.add(new_order)
+    await session.flush()  # Получаем ID нового заказа
+
+    # Переносим товары из корзины в заказ
+    for item in cart_items:
+        order_item = OrderItem(
+            order_id=new_order.id,
+            product_id=item.product_id,
+            quantity=item.stock,
+            price=item.product.price
+        )
+        session.add(order_item)
+
+    await session.commit()
+    return new_order
+
+async def get_orders(session: AsyncSession):
+    query = select(Order).order_by(Order.created.desc())
+    result = await session.execute(query)
+    return result.scalars().all()
+
+async def update_order_status(session: AsyncSession, order_id: int, status: str):
+    query = update(Order).where(Order.id == order_id).values(status=status)
+    await session.execute(query)
+    await session.commit()

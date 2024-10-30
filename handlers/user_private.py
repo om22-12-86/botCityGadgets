@@ -6,11 +6,17 @@ from database.models import Banner, Cart, Category, Product, User
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
 from database.orm_query import orm_add_to_cart, orm_add_user, orm_get_products_by_keywords, orm_get_products
+from database.orm_query import create_order, get_orders, update_order_status
 from filters.chat_types import ChatTypeFilter
 from handlers.menu_processing import get_menu_content, carts# Импортируем функции
 from kbds.inline import MenuCallBack, get_product_buttons, get_user_products_btns
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from database.orm_query import create_order, orm_get_user_carts
+from utils.paginator import Paginator
 
-# Создаем новый роутер для частных сообщений (личных сообщений пользователей)
+
+
+
 user_private_router = Router()
 user_private_router.message.filter(ChatTypeFilter(["private"]))  # Ограничиваем роутер для частных чатов
 
@@ -166,4 +172,42 @@ async def go_to_main_menu(callback: types.CallbackQuery, session: AsyncSession):
 
 
 
+@user_private_router.callback_query(F.data == "order")
+async def handle_order(callback: types.CallbackQuery, session: AsyncSession):
+    user_id = callback.from_user.id
+    cart_items = await orm_get_user_carts(session, user_id)
+    if not cart_items:
+        await callback.message.answer("Ваша корзина пуста.")
+        return
 
+    order = await create_order(session, user_id, cart_items)
+    order_number = order.order_number
+
+    await callback.message.answer(f"Ваш заказ #{order_number} в обработке!")
+
+    order_text = "\n".join([f"{item.product.name} - {item.quantity} шт." for item in order.items])
+    total = sum([item.quantity * item.price for item in order.items])
+    admin_message = (
+        f"Новый заказ #{order_number}\n"
+        f"Пользователь: {user_id}\n"
+        f"Товары:\n{order_text}\n"
+        f"Сумма: {total} ₽"
+    )
+    await bot.send_message(ADMIN_ID, admin_message)
+
+
+# Обработчик для кнопки "Заказы" у пользователя
+@user_private_router.callback_query(F.data == "user_orders")
+async def view_user_orders(callback: types.CallbackQuery, session: AsyncSession):
+    user_id = callback.from_user.id
+    orders = await get_orders(session, user_id)
+    if not orders:
+        await callback.message.answer("У вас нет заказов.")
+        return
+
+    for order in orders:
+        order_text = "\n".join([f"{item.product.name} - {item.quantity} шт." for item in order.items])
+        total = sum([item.quantity * item.price for item in order.items])
+        await callback.message.answer(
+            f"Заказ #{order.order_number}\nСтатус: {order.status}\nТовары:\n{order_text}\nСумма: {total} ₽"
+        )
