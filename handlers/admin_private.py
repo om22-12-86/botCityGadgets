@@ -2,7 +2,7 @@ from aiogram import F, Router, types
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-
+from utils.paginator import Paginator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.orm_query import (
@@ -20,7 +20,7 @@ from database.orm_query import (
 )
 
 from filters.chat_types import ChatTypeFilter, IsAdmin
-from kbds.inline import get_callback_btns
+from kbds.inline import get_callback_btns, get_admin_keyboard
 from kbds.reply import get_keyboard
 
 admin_router = Router()
@@ -58,27 +58,32 @@ async def show_products(message: types.Message, session: AsyncSession):
 # Обработчик для показа товаров в категории
 @admin_router.callback_query(F.data.startswith('category_'))
 async def show_category_products(callback: types.CallbackQuery, session: AsyncSession):
-    category_id = callback.data.split('_')[-1]
-    print(f"Selected category ID: {category_id}")
+    category_id = int(callback.data.split('_')[-1])
 
     # Получаем товары для выбранной категории
-    products = await orm_get_products(session, int(category_id))
+    products = await orm_get_products(session, category_id)
 
-    # Перебираем товары и отправляем информацию по каждому
-    for product in products:
+    # Инициализируем пагинатор
+    paginator = Paginator(products, page=1)  # Задайте начальную страницу или используйте переданное значение
+    page_products = paginator.get_page()  # Получаем товары для текущей страницы
+
+    # Перебираем товары на текущей странице и отправляем их пользователю
+    for product in page_products:
         await callback.message.answer_photo(
             product.image,
-            caption=f"<b>{product.name}</b>\n"  # Название
-                    f"{product.description}\n"  # Описание
-                    f"Стоимость: {round(product.price, 2)} ₽\n"  # Стоимость
-                    f"В наличии: {product.stock} шт.",  # Количество на складе
+            caption=(
+                f"<b>{product.name}</b>\n"
+                f"Артикул: {product.sku}\n"
+                f"{product.description}\n"
+                f"Стоимость: {round(product.price, 2)} ₽\n"
+                f"В наличии: {product.stock} шт.\n"
+                f"<b>Товар {paginator.page} из {paginator.pages}</b>"
+            ),
             parse_mode='HTML',
-            reply_markup=get_product_buttons(category_id, product.id)  # Передаем оба аргумента
+            reply_markup=get_product_buttons(category_id, product.id)
         )
 
-    # Ожидание завершения всех сообщений
-    await callback.answer()
-    await callback.message.answer("ОК, вот список товаров ⏫")
+    await callback.answer("ОК, вот список товаров ⏫")
 
 
 
@@ -135,8 +140,11 @@ async def prompt_for_banner_image(message: types.Message, state: FSMContext):
 
 ######################### FSM для добавления/изменения товаров админом ###################
 
+from aiogram.fsm.state import State, StatesGroup
+
 class AddProduct(StatesGroup):
     name = State()
+    sku = State()  # Новый стейт для SKU
     description = State()
     category = State()
     price = State()
@@ -146,13 +154,15 @@ class AddProduct(StatesGroup):
     product_for_change = None
 
     texts = {
-        "AddProduct:name": "Введите название заново:",
-        "AddProduct:description": "Введите описание заново:",
-        "AddProduct:category": "Выберите категорию заново ⬆️",
-        "AddProduct:price": "Введите стоимость заново:",
-        "AddProduct:image": "Этот стейт последний, поэтому...",
-        "AddProduct:stock": "Введите количество товара:",
+        "AddProduct:name": "Введите название товара заново:",
+        "AddProduct:sku": "Введите артикул (SKU) заново:",  # Сообщение для sku
+        "AddProduct:description": "Введите описание товара заново:",
+        "AddProduct:category": "Выберите категорию товара заново ⬆️",
+        "AddProduct:price": "Введите стоимость товара заново:",
+        "AddProduct:image": "Отправьте фото товара:",
+        "AddProduct:stock": "Введите количество товара заново:",
     }
+
 
 
 @admin_router.callback_query(StateFilter(None), F.data.startswith("change_"))
@@ -209,8 +219,18 @@ async def add_name(message: types.Message, state: FSMContext):
             await message.answer("Название товара должно быть от 5 до 150 символов. Введите заново.")
             return
         await state.update_data(name=message.text)
+    await message.answer("Введите артикул (SKU) товара")
+    await state.set_state(AddProduct.sku)
+
+
+
+@admin_router.message(AddProduct.sku, F.text)
+async def add_sku(message: types.Message, state: FSMContext):
+    await state.update_data(sku=message.text)
     await message.answer("Введите описание товара")
     await state.set_state(AddProduct.description)
+
+
 
 
 @admin_router.message(AddProduct.name)
@@ -340,6 +360,7 @@ async def admin_search_products(message: types.Message, session: AsyncSession, s
         await message.answer_photo(
             product.image,
             caption=f"<b>{product.name}</b>\n"
+                    f"<b>{product.sku}</b>\n"
                     f"{product.description}\n"
                     f"Стоимость: {round(product.price, 2)} ₽\n"
                     f"В наличии: {product.stock} шт.",
@@ -357,9 +378,6 @@ async def admin_search_products(message: types.Message, session: AsyncSession, s
 
 
 
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from database.orm_query import get_orders, update_order_status
-
 # Обработчик кнопки "Заказы"
 @admin_router.message(F.text == "Заказы")
 async def show_orders(message: types.Message, session: AsyncSession):
@@ -369,55 +387,29 @@ async def show_orders(message: types.Message, session: AsyncSession):
         return
 
     for order in orders:
-        order_text = "\n".join([f"{item.product.name} - {item.quantity} шт." for item in order.items])
+        items = "\n".join([f"{item.product.name} - {item.quantity} шт." for item in order.items])
         total = sum([item.quantity * item.price for item in order.items])
 
         buttons = InlineKeyboardMarkup().add(
-            InlineKeyboardButton("Отмена", callback_data=f"order_cancel_{order.id}"),
-            InlineKeyboardButton("Готов", callback_data=f"order_ready_{order.id}"),
-            InlineKeyboardButton("Выдан", callback_data=f"order_issued_{order.id}")
+            InlineKeyboardButton("Отмена", callback_data=f"cancel_order_{order.id}"),
+            InlineKeyboardButton("Готов", callback_data=f"ready_order_{order.id}"),
+            InlineKeyboardButton("Выдан", callback_data=f"delivered_order_{order.id}")
         )
 
         await message.answer(
-            f"Заказ #{order.order_number}\nПользователь ID: {order.user_id}\nСтатус: {order.status}\nТовары:\n{order_text}\nСумма: {total} ₽",
+            f"Заказ #{order.order_number}\nПользователь ID: {order.user_id}\nСтатус: {order.status}\nТовары:\n{items}\nСумма: {total} ₽",
             reply_markup=buttons
         )
 
 
 
 
-@admin_router.message(F.text == "Заказы")
-async def show_orders(message: types.Message, session: AsyncSession):
-    orders = await get_orders(session)
-    if not orders:
-        await message.answer("Пока нет заказов.")
-        return
-
-    for order in orders:
-        order_text = "\n".join(
-            [f"{item.product.name} - {item.quantity} шт." for item in order.items]
-        )
-        total = sum([item.quantity * item.price for item in order.items])
-
-        buttons = InlineKeyboardMarkup().add(
-            InlineKeyboardButton("Отмена", callback_data=f"order_cancel_{order.id}"),
-            InlineKeyboardButton("Готов", callback_data=f"order_ready_{order.id}"),
-            InlineKeyboardButton("Выдан", callback_data=f"order_issued_{order.id}")
-        )
-
-        await message.answer(
-            f"Заказ #{order.order_number}\n"
-            f"Пользователь ID: {order.user_id}\n"
-            f"Статус: {order.status}\n"
-            f"Товары:\n{order_text}\n"
-            f"Сумма: {total} ₽",
-            reply_markup=buttons
-        )
-
-# Обработчики статуса заказа у администратора
+# Обработчики изменения статуса заказа
 @admin_router.callback_query(F.data.startswith("order_"))
 async def handle_order_action(callback: types.CallbackQuery, session: AsyncSession):
     action, order_id = callback.data.split('_')[1], int(callback.data.split('_')[-1])
+    user_id = callback.from_user.id
+
     status_map = {
         "cancel": "Отменен",
         "ready": "Готов к получению",
@@ -427,13 +419,14 @@ async def handle_order_action(callback: types.CallbackQuery, session: AsyncSessi
         await update_order_status(session, order_id, status_map[action])
         await callback.answer(f"Статус заказа обновлен: {status_map[action]}")
 
-        # Уведомление пользователя
-        if action == "cancel":
-            await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} отменен.")
-        elif action == "ready":
-            await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} готов к получению!")
-        elif action == "issued":
-            await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} выдан.")
+        # Уведомляем пользователя
+        user_message = {
+            "cancel": f"Ваш заказ #{order_id} отменен.",
+            "ready": f"Ваш заказ #{order_id} готов к получению!",
+            "issued": f"Ваш заказ #{order_id} выдан."
+        }
+        await bot.send_message(user_id, user_message[action])
+
 
 
 
@@ -462,22 +455,23 @@ async def view_orders(callback: types.CallbackQuery, session: AsyncSession):
 async def cancel_order(callback: types.CallbackQuery, session: AsyncSession):
     order_id = int(callback.data.split("_")[-1])
     await update_order_status(session, order_id, "Отменен")
-    await callback.message.answer("Заказ отменен.")
+    await callback.answer("Заказ отменен.")
     await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} отменен.")
 
 @admin_router.callback_query(F.data.startswith("ready_order_"))
 async def ready_order(callback: types.CallbackQuery, session: AsyncSession):
     order_id = int(callback.data.split("_")[-1])
     await update_order_status(session, order_id, "Готов")
-    await callback.message.answer("Заказ готов к получению.")
+    await callback.answer("Заказ готов к получению.")
     await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} готов к получению.")
 
 @admin_router.callback_query(F.data.startswith("delivered_order_"))
 async def delivered_order(callback: types.CallbackQuery, session: AsyncSession):
     order_id = int(callback.data.split("_")[-1])
     await update_order_status(session, order_id, "Выдан")
-    await callback.message.answer("Заказ выдан.")
+    await callback.answer("Заказ выдан.")
     await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} выдан.")
+
 
 
 # Обработчик для загрузки файла Excel
@@ -485,12 +479,11 @@ async def delivered_order(callback: types.CallbackQuery, session: AsyncSession):
 async def prompt_for_excel_upload(message: types.Message):
     await message.answer("Пожалуйста, отправьте файл Excel для загрузки.")
 
-
 @admin_router.message(F.document.file_name.endswith(".xls") | F.document.file_name.endswith(".xlsx"))
 async def handle_excel_upload(message: types.Message):
     file_id = message.document.file_id
     file = await bot.get_file(file_id)
 
-    # Загрузка файла на сервер для обработки
+    # Загрузка файла на сервер
     await file.download(destination=f"/path/to/upload/{message.document.file_name}")
     await message.answer("Файл Excel успешно загружен и обработан.")

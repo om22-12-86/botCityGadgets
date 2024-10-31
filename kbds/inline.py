@@ -188,12 +188,17 @@ def get_user_cart(
         return keyboard.adjust(*sizes).as_markup()
 
 def get_order_admin_buttons(order_id):
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton("Отмена", callback_data=f"cancel_order_{order_id}")],
         [InlineKeyboardButton("Готов", callback_data=f"ready_order_{order_id}")],
         [InlineKeyboardButton("Выдан", callback_data=f"delivered_order_{order_id}")]
     ])
-    return keyboard
+
+def get_order_buttons():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton("На главную 🏠", callback_data="main_menu")]
+    ])
+
 
 def get_admin_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[

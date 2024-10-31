@@ -5,12 +5,11 @@ from sqlalchemy import select
 from database.models import Banner, Cart, Category, Product, User
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
-from database.orm_query import orm_add_to_cart, orm_add_user, orm_get_products_by_keywords, orm_get_products
-from database.orm_query import create_order, get_orders, update_order_status
+from database.orm_query import orm_add_to_cart, orm_add_user, orm_get_products_by_keywords, orm_get_products, orm_get_user_carts, create_order, get_orders, update_order_status
 from filters.chat_types import ChatTypeFilter
 from handlers.menu_processing import get_menu_content, carts# Импортируем функции
 from kbds.inline import MenuCallBack, get_product_buttons, get_user_products_btns
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from database.orm_query import create_order, orm_get_user_carts
 from utils.paginator import Paginator
 
@@ -37,17 +36,24 @@ async def show_products_by_category(callback: types.CallbackQuery, session: Asyn
         await callback.message.answer("В этой категории товары не найдены.")
         return
 
-    for product in products:
+    # Создаем объект Paginator с начальной страницей
+    paginator = Paginator(products, page=1)  # Задаем начальную страницу (например, 1)
+    page_products = paginator.get_page()  # Получаем товары для текущей страницы
+
+    # Перебираем товары на текущей странице и отправляем их пользователю
+    for product in page_products:
         await callback.message.answer_photo(
             product.image,
             caption=f"<b>{product.name}</b>\n"
+                    f"<b>{product.sku}</b>\n"
                     f"{product.description}\n"
                     f"Стоимость: {round(product.price, 2)} ₽\n"
-                    f"В наличии: {product.stock} шт. \n"
+                    f"В наличии: {product.stock} шт.\n"
                     f"<b>Товар {paginator.page} из {paginator.pages}</b>",
             parse_mode='HTML',
             reply_markup=get_product_buttons(category_id, product.id)
         )
+
     await callback.answer()
 
 
@@ -131,11 +137,20 @@ async def search_products(message: types.Message, session: AsyncSession, state: 
     for product in products:
         await message.answer_photo(
             product.image,
-            caption=f"<b>{product.name}</b>\n{product.description}\nЦена: {product.price} ₽\nВ наличии: {product.stock} шт.\n",
+            caption=(
+                f"<b>{product.name}</b>\n"
+                f"Артикул: {product.sku}\n"
+                f"{product.description}\n"
+                f"Цена: {product.price} ₽\n"
+                f"В наличии: {product.stock} шт.\n"
+            ),
             parse_mode='HTML',
             reply_markup=get_user_products_btns(product_id=product.id)
         )
     await state.clear()
+
+
+
 
 # Функция для добавления товара в корзину по нажатию "Купить"
 @user_private_router.callback_query(F.data.startswith('buy_'))
@@ -170,7 +185,7 @@ async def go_to_main_menu(callback: types.CallbackQuery, session: AsyncSession):
     await callback.answer("Вы вернулись в главное меню.")
 
 
-
+# Функция для обработки заказа пользователя
 
 @user_private_router.callback_query(F.data == "order")
 async def handle_order(callback: types.CallbackQuery, session: AsyncSession):
@@ -180,13 +195,26 @@ async def handle_order(callback: types.CallbackQuery, session: AsyncSession):
         await callback.message.answer("Ваша корзина пуста.")
         return
 
+    # Создаем новый заказ
     order = await create_order(session, user_id, cart_items)
     order_number = order.order_number
 
-    await callback.message.answer(f"Ваш заказ #{order_number} в обработке!")
-
+    # Формируем информацию для пользователя
     order_text = "\n".join([f"{item.product.name} - {item.quantity} шт." for item in order.items])
     total = sum([item.quantity * item.price for item in order.items])
+
+    # Сообщение для пользователя
+    await callback.message.answer(
+        f"Номер заказа: #{order_number}\n"
+        f"Товары:\n{order_text}\n"
+        f"Сумма: {total} ₽\n"
+        "\nВаш заказ в обработке, ожидайте.",
+        reply_markup=InlineKeyboardMarkup().add(
+            InlineKeyboardButton("На главную 🏠", callback_data="main_menu")
+        )
+    )
+
+    # Сообщение для администратора
     admin_message = (
         f"Новый заказ #{order_number}\n"
         f"Пользователь: {user_id}\n"
@@ -196,18 +224,36 @@ async def handle_order(callback: types.CallbackQuery, session: AsyncSession):
     await bot.send_message(ADMIN_ID, admin_message)
 
 
-# Обработчик для кнопки "Заказы" у пользователя
+
+
 @user_private_router.callback_query(F.data == "user_orders")
 async def view_user_orders(callback: types.CallbackQuery, session: AsyncSession):
-    user_id = callback.from_user.id
-    orders = await get_orders(session, user_id)
+    orders = await get_orders(session, user_id=callback.from_user.id)
     if not orders:
         await callback.message.answer("У вас нет заказов.")
         return
 
     for order in orders:
-        order_text = "\n".join([f"{item.product.name} - {item.quantity} шт." for item in order.items])
+        items = "\n".join([f"{item.product.name} - {item.quantity} шт." for item in order.items])
         total = sum([item.quantity * item.price for item in order.items])
         await callback.message.answer(
-            f"Заказ #{order.order_number}\nСтатус: {order.status}\nТовары:\n{order_text}\nСумма: {total} ₽"
+            f"Заказ #{order.order_number}\nТовары:\n{items}\nСумма: {total} ₽"
         )
+
+
+
+@user_private_router.callback_query(F.data == "user_orders")
+async def show_user_orders(callback: types.CallbackQuery, session: AsyncSession):
+    content, reply_markup = await user_orders(session, user_id=callback.from_user.id)
+    await callback.message.answer(content, reply_markup=reply_markup)
+    await callback.answer()
+
+
+
+# Обработчик для возврата пользователя в главное меню
+@user_private_router.callback_query(F.data == 'main_menu')
+async def go_to_main_menu(callback: types.CallbackQuery, session: AsyncSession):
+    media, reply_markup = await get_menu_content(session, level=0, menu_name='main')
+    await callback.message.edit_media(media=media, reply_markup=reply_markup)
+    await callback.answer("Вы вернулись в главное меню.")
+

@@ -5,15 +5,21 @@ from sqlalchemy.orm import joinedload
 from sqlalchemy.exc import IntegrityError
 import random
 from database.models import Banner, Cart, Category, Product, User, Order, OrderItem
+import logging
+
+logging.basicConfig(level=logging.INFO)
+
+
 
 # Работа с баннерами (информационными страницами)
 async def orm_add_banner_description(session: AsyncSession, data: dict):
     query = select(Banner)
     result = await session.execute(query)
-    if result.first():  # Если данные уже существуют, обновите их вместо завершения
-        return  # Либо обновите существующий баннер, если это необходимо
+    if result.first():
+        return
     session.add_all([Banner(name=name, description=description) for name, description in data.items()])
     await session.commit()
+    return True
 
 
 
@@ -22,32 +28,27 @@ async def orm_change_banner_image(session: AsyncSession, name: str, image: str):
     await session.execute(query)
     await session.commit()
 
-
 async def orm_get_banner(session: AsyncSession, page: str):
     query = select(Banner).where(Banner.name == page)
     result = await session.execute(query)
     banner = result.scalar()
-    # Если баннер не найден, возвращаем стандартный баннер
     if not banner:
-        print(f"Баннер '{page}' не найден. Используется стандартный баннер.")
-        return Banner(image="DEFAULT_IMAGE_URL", description="Стандартное описание баннера")  # Укажите URL стандартного изображения
+        logging.info(f"Banner '{page}' not found. Using default banner.")
+        return Banner(image="DEFAULT_IMAGE_URL", description="Default banner description")
     return banner
-
 
 async def orm_get_info_pages(session: AsyncSession):
     query = select(Banner)
     result = await session.execute(query)
     return result.scalars().all()
 
+
+
 # Работа с категориями
 async def orm_get_categories(session: AsyncSession):
     query = select(Category)
     result = await session.execute(query)
-    categories = result.scalars().all()
-
-    # Убедитесь, что функция возвращает пустой список, а не None
-    return categories if categories else []
-
+    return result.scalars().all()
 
 async def orm_create_categories(session: AsyncSession, categories: list):
     query = select(Category)
@@ -57,11 +58,14 @@ async def orm_create_categories(session: AsyncSession, categories: list):
     session.add_all([Category(name=name) for name in categories])
     await session.commit()
 
+
+
 # Добавление и редактирование товаров
 async def orm_add_product(session: AsyncSession, data: dict):
     try:
         obj = Product(
             name=data["name"],
+            sku=data.get("sku"),  # Проверка на наличие SKU
             description=data["description"],
             price=float(data["price"]),
             image=data["image"],
@@ -70,28 +74,24 @@ async def orm_add_product(session: AsyncSession, data: dict):
         )
         session.add(obj)
         await session.commit()
-    except Exception as e:
+    except IntegrityError as e:
         await session.rollback()
-        print(f"Ошибка при добавлении продукта: {e}")
+        logging.error(f"Error adding product: {e}")
         raise
 
 
 
 async def orm_get_products(session: AsyncSession, category_id: int):
-    if category_id is None:
-        return []  # Вернуть пустой список
     query = select(Product).where(Product.category_id == category_id)
     result = await session.execute(query)
     return result.scalars().all()
-
-
-
-
 
 async def orm_get_product(session: AsyncSession, product_id: int):
     query = select(Product).where(Product.id == product_id)
     result = await session.execute(query)
     return result.scalar()
+
+
 
 
 async def orm_update_product(session: AsyncSession, product_id: int, data: dict):
@@ -100,6 +100,7 @@ async def orm_update_product(session: AsyncSession, product_id: int, data: dict)
         .where(Product.id == product_id)
         .values(
             name=data["name"],
+            sku=data.get("sku"),
             description=data["description"],
             price=float(data["price"]),
             image=data["image"],
@@ -118,6 +119,8 @@ async def orm_delete_product(session: AsyncSession, product_id: int):
     await session.execute(query)
     await session.commit()
 
+
+
 # Работа с пользователями
 async def orm_add_user(session: AsyncSession, user_id: int, first_name: str = None, last_name: str = None, phone: str = None):
     # Проверка существования пользователя
@@ -129,64 +132,43 @@ async def orm_add_user(session: AsyncSession, user_id: int, first_name: str = No
         await session.commit()
 
 
-
 # Работа с корзинами
 async def orm_add_to_cart(session: AsyncSession, user_id: int, product_id: int):
-    # Проверяем, существует ли пользователь в базе данных
     user_query = select(User).where(User.user_id == user_id)
     user = (await session.execute(user_query)).scalar()
-
-    # Если пользователя нет, добавляем его
     if not user:
         session.add(User(user_id=user_id))
         try:
-            await session.commit()  # Сохраняем изменения для пользователя
-            print("Пользователь успешно добавлен.")
-            user = (await session.execute(user_query)).scalar()  # Повторная проверка
+            await session.commit()
+            user = (await session.execute(user_query)).scalar()
         except IntegrityError as e:
             await session.rollback()
-            print(f"Ошибка при добавлении пользователя: {e}")
+            logging.error(f"Error adding user: {e}")
             return None
 
-    if not user:
-        print("Ошибка: пользователь не добавлен в базу данных.")
-        return None
-
-    # Проверка наличия продукта на складе
     product_query = select(Product).where(Product.id == product_id)
     product = (await session.execute(product_query)).scalar()
-
-    if not product:
-        print("Товар не найден.")
-        return None
-    elif product.stock <= 0:
-        print("Товар недоступен для добавления в корзину.")
+    if not product or product.stock <= 0:
         return None
 
-    # Проверяем, есть ли товар в корзине пользователя
     cart_query = select(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id)
     cart_item = (await session.execute(cart_query)).scalar()
 
-    # Если товар уже есть в корзине, увеличиваем количество, иначе добавляем новый товар в корзину
     if cart_item:
         if cart_item.stock < product.stock:
             cart_item.stock += 1
         else:
-            print("Недостаточно товара на складе.")
+            logging.warning("Insufficient stock.")
             return None
     else:
-        # Добавляем новый товар в корзину
-        new_cart_item = Cart(user_id=user_id, product_id=product_id, stock=1)
-        session.add(new_cart_item)
+        session.add(Cart(user_id=user_id, product_id=product_id, stock=1))
 
-    # Уменьшаем количество товара на складе
     product.stock -= 1
     try:
         await session.commit()
-        print("Товар успешно добавлен в корзину.")
     except IntegrityError as e:
         await session.rollback()
-        print(f"Ошибка при добавлении товара в корзину: {e}")
+        logging.error(f"Error adding to cart: {e}")
         return None
     return cart_item
 
@@ -200,57 +182,38 @@ async def orm_get_user_carts(session: AsyncSession, user_id):
     result = await session.execute(query)
     return result.scalars().all()
 
-
 async def orm_delete_from_cart(session: AsyncSession, user_id: int, product_id: int):
     query = delete(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id)
     await session.execute(query)
     await session.commit()
 
-
 async def orm_reduce_product_in_cart(session: AsyncSession, user_id: int, product_id: int):
     query = select(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id)
     cart = await session.execute(query)
     cart = cart.scalar()
-
     if not cart:
         return
-
     if cart.stock > 1:
         cart.stock -= 1
         await session.commit()
-
-        # Увеличиваем количество товара на складе
         product_query = select(Product).where(Product.id == product_id)
         product = await session.execute(product_query)
-        product = product.scalar()
-        if product:
-            product.stock += 1
+        if product.scalar():
+            product.scalar().stock += 1
             await session.commit()
-
         return True
     else:
         await orm_delete_from_cart(session, user_id, product_id)
-        await session.commit()
-
-        # Увеличиваем количество товара на складе при удалении из корзины
         product_query = select(Product).where(Product.id == product_id)
         product = await session.execute(product_query)
-        product = product.scalar()
-        if product:
-            product.stock += 1
+        if product.scalar():
+            product.scalar().stock += 1
             await session.commit()
-
         return False
 
 
 async def orm_get_products_by_keywords(session: AsyncSession, keywords: str):
-    """
-    Функция для поиска товаров по ключевым словам.
-    :param session: Асинхронная сессия для взаимодействия с базой данных
-    :param keywords: Ключевые слова для поиска
-    :return: Список товаров, соответствующих ключевым словам
-    """
-    keyword_list = keywords.split()  # Разбиваем ключевые слова на список
+    keyword_list = keywords.split()
     query = select(Product).where(
         or_(
             *[Product.name.ilike(f"%{keyword}%") for keyword in keyword_list],
@@ -260,30 +223,25 @@ async def orm_get_products_by_keywords(session: AsyncSession, keywords: str):
     result = await session.execute(query)
     return result.scalars().all()
 
-
-
 async def create_order(session: AsyncSession, user_id: int, cart_items):
-    # Генерация уникального номера заказа из 7 символов
     order_number = ''.join(random.choices('0123456789', k=7))
     new_order = Order(user_id=user_id, order_number=order_number)
     session.add(new_order)
-    await session.flush()  # Получаем ID нового заказа
+    await session.flush()
 
-    # Переносим товары из корзины в заказ
     for item in cart_items:
-        order_item = OrderItem(
+        session.add(OrderItem(
             order_id=new_order.id,
             product_id=item.product_id,
             quantity=item.stock,
             price=item.product.price
-        )
-        session.add(order_item)
+        ))
 
     await session.commit()
     return new_order
 
 async def get_orders(session: AsyncSession):
-    query = select(Order).order_by(Order.created.desc())
+    query = select(Order).order_by(Order.created.desc()).options(joinedload(Order.items))
     result = await session.execute(query)
     return result.scalars().all()
 
