@@ -131,14 +131,19 @@ async def carts(session: AsyncSession, level: int, menu_name: str, page: int, us
         paginator = Paginator(carts, page=page)
         cart = paginator.get_page()[0]
 
-        cart_price = round(cart.stock * cart.product.price, 2)
-        total_price = round(sum(cart.stock * cart.product.price for cart in carts), 2)
+        # Получаем продукт из объекта корзины
+        product = cart.product  # Здесь cart.product используется для доступа к продукту
+
+        cart_price = round(cart.stock * product.price, 2)
+        total_price = round(sum(item.stock * item.product.price for item in carts), 2)
 
         image = InputMediaPhoto(
-            media=cart.product.image,
+            media=product.image,
             caption=(
-                f"<b>{cart.product.name}</b>\n"
-                f"{cart.product.price}₽ x {cart.stock} = {cart_price}₽\n"
+                f"<b>{product.name}</b>\n"
+                f"Артикул: {product.sku}\n"
+                f"{product.description}\n"
+                f"Цена: {product.price}₽ x {cart.stock} = {cart_price}₽\n"
                 f"Товар {paginator.page} из {paginator.pages} в корзине.\n"
                 f"Общая стоимость товаров в корзине {total_price}₽"
             ),
@@ -150,9 +155,10 @@ async def carts(session: AsyncSession, level: int, menu_name: str, page: int, us
             level=level,
             page=page,
             pagination_btns=pagination_btns,
-            product_id=cart.product.id,
+            product_id=product.id,
         )
     return image, kbds
+
 
 
 async def get_banner(session: AsyncSession, banner_name: str):

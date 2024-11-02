@@ -187,29 +187,29 @@ async def orm_delete_from_cart(session: AsyncSession, user_id: int, product_id: 
     await session.execute(query)
     await session.commit()
 
+# Ваша функция orm_reduce_product_in_cart
 async def orm_reduce_product_in_cart(session: AsyncSession, user_id: int, product_id: int):
-    query = select(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id)
-    cart = await session.execute(query)
-    cart = cart.scalar()
+    # Получаем элемент корзины
+    cart_query = select(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id)
+    cart_result = await session.execute(cart_query)
+    cart = cart_result.scalar()
     if not cart:
-        return
+        return  # Выходим, если элемента в корзине нет
+
+    # Уменьшаем количество товара в корзине
     if cart.stock > 1:
         cart.stock -= 1
-        await session.commit()
-        product_query = select(Product).where(Product.id == product_id)
-        product = await session.execute(product_query)
-        if product.scalar():
-            product.scalar().stock += 1
-            await session.commit()
-        return True
+        await session.commit()  # Фиксируем изменения
     else:
-        await orm_delete_from_cart(session, user_id, product_id)
-        product_query = select(Product).where(Product.id == product_id)
-        product = await session.execute(product_query)
-        if product.scalar():
-            product.scalar().stock += 1
-            await session.commit()
-        return False
+        await orm_delete_from_cart(session, user_id, product_id)  # Удаляем товар из корзины, если он был последний
+
+    # Обновляем количество товара на складе
+    product_query = select(Product).where(Product.id == product_id)
+    product_result = await session.execute(product_query)
+    product = product_result.scalar()
+    if product:
+        product.stock += 1  # Возвращаем товар на склад
+        await session.commit()  # Фиксируем изменения в базе данных
 
 
 async def orm_get_products_by_keywords(session: AsyncSession, keywords: str):

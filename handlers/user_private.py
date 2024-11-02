@@ -101,6 +101,8 @@ async def user_menu(callback: types.CallbackQuery, callback_data: MenuCallBack, 
     if callback_data.menu_name == "add_to_cart":
         await add_to_cart(callback, callback_data, session)
         return
+
+    # Получаем содержимое меню
     media, reply_markup = await get_menu_content(
         session,
         level=callback_data.level,
@@ -110,10 +112,24 @@ async def user_menu(callback: types.CallbackQuery, callback_data: MenuCallBack, 
         product_id=callback_data.product_id,
         user_id=callback.from_user.id,
     )
+
+    # Проверка на изменение содержимого
     if isinstance(media, types.InputMediaPhoto):
+        if callback.message.photo and callback.message.caption == media.caption and callback.message.reply_markup == reply_markup:
+            await callback.answer("Контент не изменился.")
+            return
+        # Обновляем фото, если есть изменения
         await callback.message.edit_media(media=media, reply_markup=reply_markup)
-    else:
+
+    elif isinstance(media, str):
+        if callback.message.text == media and callback.message.reply_markup == reply_markup:
+            await callback.answer("Контент не изменился.")
+            return
         await callback.message.edit_text(text=media, reply_markup=reply_markup)
+
+    else:
+        await callback.message.answer("Произошла ошибка при загрузке контента.")
+
     await callback.answer()
 
 
