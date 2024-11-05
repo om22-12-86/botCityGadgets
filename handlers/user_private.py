@@ -5,12 +5,11 @@ from sqlalchemy import select
 from database.models import Banner, Cart, Category, Product, User
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
-from database.orm_query import orm_add_to_cart, orm_add_user, orm_get_products_by_keywords, orm_get_products, orm_get_user_carts, create_order, get_orders, update_order_status
+from database.orm_query import orm_add_to_cart, orm_add_user, orm_get_products_by_keywords, orm_get_products, orm_get_user_carts, create_order_from_cart, get_user_orders
 from filters.chat_types import ChatTypeFilter
 from handlers.menu_processing import get_menu_content, carts# Импортируем функции
 from kbds.inline import MenuCallBack, get_product_buttons, get_user_products_btns
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from database.orm_query import create_order, orm_get_user_carts
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from utils.paginator import Paginator
 
 
@@ -139,6 +138,16 @@ class UserSearchProduct(StatesGroup):
     keywords = State()
 
 
+# Обработка кнопки "Поиск"
+@user_private_router.callback_query(F.data == 'search')
+async def start_search(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введите ключевые слова для поиска:")
+    await state.set_state(UserSearchProduct.keywords)
+    await callback.answer()
+
+
+
+
 # Обработчик поиска товаров
 @user_private_router.message(UserSearchProduct.keywords, F.text)
 async def search_products(message: types.Message, session: AsyncSession, state: FSMContext):
@@ -184,15 +193,6 @@ async def buy_product(callback: types.CallbackQuery, session: AsyncSession):
         await callback.answer("Не удалось добавить товар. Возможно, товар закончился или пользователь не добавлен.")
 
 
-
-# Обработка кнопки "Поиск"
-@user_private_router.callback_query(F.data == 'search')
-async def start_search(callback: types.CallbackQuery, state: FSMContext):
-    await callback.message.answer("Введите ключевые слова для поиска:")
-    await state.set_state(UserSearchProduct.keywords)
-    await callback.answer()
-
-
 @user_private_router.callback_query(F.data == 'main_menu')
 async def go_to_main_menu(callback: types.CallbackQuery, session: AsyncSession):
     # Здесь функция для возврата к главному меню
@@ -201,75 +201,24 @@ async def go_to_main_menu(callback: types.CallbackQuery, session: AsyncSession):
     await callback.answer("Вы вернулись в главное меню.")
 
 
-# Функция для обработки заказа пользователя
+
 
 @user_private_router.callback_query(F.data == "order")
-async def handle_order(callback: types.CallbackQuery, session: AsyncSession):
+async def handle_create_order(callback: CallbackQuery, session: AsyncSession):
     user_id = callback.from_user.id
-    cart_items = await orm_get_user_carts(session, user_id)
-    if not cart_items:
-        await callback.message.answer("Ваша корзина пуста.")
-        return
+    order = await create_order_from_cart(session, user_id)
 
-    # Создаем новый заказ
-    order = await create_order(session, user_id, cart_items)
-    order_number = order.order_number
-
-    # Формируем информацию для пользователя
-    order_text = "\n".join([f"{item.product.name} - {item.quantity} шт." for item in order.items])
-    total = sum([item.quantity * item.price for item in order.items])
-
-    # Сообщение для пользователя
-    await callback.message.answer(
-        f"Номер заказа: #{order_number}\n"
-        f"Товары:\n{order_text}\n"
-        f"Сумма: {total} ₽\n"
-        "\nВаш заказ в обработке, ожидайте.",
-        reply_markup=InlineKeyboardMarkup().add(
-            InlineKeyboardButton("На главную 🏠", callback_data="main_menu")
-        )
-    )
-
-    # Сообщение для администратора
-    admin_message = (
-        f"Новый заказ #{order_number}\n"
-        f"Пользователь: {user_id}\n"
-        f"Товары:\n{order_text}\n"
-        f"Сумма: {total} ₽"
-    )
-    await bot.send_message(ADMIN_ID, admin_message)
-
-
-
-
-@user_private_router.callback_query(F.data == "user_orders")
-async def view_user_orders(callback: types.CallbackQuery, session: AsyncSession):
-    orders = await get_orders(session, user_id=callback.from_user.id)
-    if not orders:
-        await callback.message.answer("У вас нет заказов.")
-        return
-
-    for order in orders:
-        items = "\n".join([f"{item.product.name} - {item.quantity} шт." for item in order.items])
-        total = sum([item.quantity * item.price for item in order.items])
+    if order:
         await callback.message.answer(
-            f"Заказ #{order.order_number}\nТовары:\n{items}\nСумма: {total} ₽"
+            f"Ваш заказ #{order.order_number} успешно создан и находится в обработке.",
+            reply_markup=InlineKeyboardMarkup().add(InlineKeyboardButton("На главную 🏠", callback_data="main_menu"))
         )
-
-
-
-@user_private_router.callback_query(F.data == "user_orders")
-async def show_user_orders(callback: types.CallbackQuery, session: AsyncSession):
-    content, reply_markup = await user_orders(session, user_id=callback.from_user.id)
-    await callback.message.answer(content, reply_markup=reply_markup)
+    else:
+        await callback.message.answer("Ваша корзина пуста.")
     await callback.answer()
 
-
-
-# Обработчик для возврата пользователя в главное меню
-@user_private_router.callback_query(F.data == 'main_menu')
-async def go_to_main_menu(callback: types.CallbackQuery, session: AsyncSession):
-    media, reply_markup = await get_menu_content(session, level=0, menu_name='main')
-    await callback.message.edit_media(media=media, reply_markup=reply_markup)
-    await callback.answer("Вы вернулись в главное меню.")
-
+@user_private_router.callback_query(F.data == "view_orders")
+async def handle_view_orders(callback: CallbackQuery, session: AsyncSession):
+    orders_text, keyboard = await user_orders(session, callback.from_user.id)
+    await callback.message.answer(orders_text, reply_markup=keyboard)
+    await callback.answer()

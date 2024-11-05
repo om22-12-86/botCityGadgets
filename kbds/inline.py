@@ -11,6 +11,10 @@ class MenuCallBack(CallbackData, prefix="menu"):
     page: int = 1
     product_id: int | None = None
 
+
+
+
+
 # Обновленная функция для создания кнопок удаления и изменения товара
 def get_product_buttons(category_id, product_id):
     keyboard = InlineKeyboardBuilder()
@@ -27,7 +31,7 @@ def get_user_main_btns(*, level: int, sizes: tuple[int] = (2,)):
         "О нас ℹ️": "about",
         "Оплата 💵": "payment",
         "Доставка 🚚": "shipping",
-        "Заказы 📝": "user_orders"  # Новая кнопка для отображения заказов
+        "Заказы 📝": "order"  # Новая кнопка для отображения заказов
     }
     for text, menu_name in btns.items():
         if menu_name == 'catalog':
@@ -177,7 +181,7 @@ def get_user_cart(
             InlineKeyboardButton(text='На главную 🏠',
                                  callback_data=MenuCallBack(level=0, menu_name='main').pack()),
             InlineKeyboardButton(text='Заказать☝🏻',
-                                 callback_data=MenuCallBack(level=0, menu_name='order').pack()),
+                                 callback_data="order"),
         ]
         return keyboard.row(*row2).as_markup()
     else:
@@ -187,24 +191,8 @@ def get_user_cart(
 
         return keyboard.adjust(*sizes).as_markup()
 
-def get_order_admin_buttons(order_id):
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("Отмена", callback_data=f"cancel_order_{order_id}")],
-        [InlineKeyboardButton("Готов", callback_data=f"ready_order_{order_id}")],
-        [InlineKeyboardButton("Выдан", callback_data=f"delivered_order_{order_id}")]
-    ])
-
-def get_order_buttons():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton("На главную 🏠", callback_data="main_menu")]
-    ])
 
 
-def get_admin_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Заказы", callback_data="view_orders")],
-        # Другие кнопки
-    ])
 
 
 # Функция для создания кнопок "Назад", "Корзина", "Купить"

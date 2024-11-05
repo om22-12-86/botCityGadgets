@@ -1,9 +1,10 @@
 from sqlalchemy import or_
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload
+from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
 import random
+from datetime import datetime
 from database.models import Banner, Cart, Category, Product, User, Order, OrderItem
 import logging
 
@@ -22,7 +23,6 @@ async def orm_add_banner_description(session: AsyncSession, data: dict):
     return True
 
 
-
 async def orm_change_banner_image(session: AsyncSession, name: str, image: str):
     query = update(Banner).where(Banner.name == name).values(image=image)
     await session.execute(query)
@@ -32,10 +32,13 @@ async def orm_get_banner(session: AsyncSession, page: str):
     query = select(Banner).where(Banner.name == page)
     result = await session.execute(query)
     banner = result.scalar()
-    if not banner:
-        logging.info(f"Banner '{page}' not found. Using default banner.")
-        return Banner(image="DEFAULT_IMAGE_URL", description="Default banner description")
+    if not banner or not banner.image:
+        logging.info(f"Banner '{page}' не содержит корректного изображения или описания. Используются стандартные значения.")
+        return Banner(image="DEFAULT_IMAGE_URL", description="Описание по умолчанию")
     return banner
+
+
+
 
 async def orm_get_info_pages(session: AsyncSession):
     query = select(Banner)
@@ -60,12 +63,13 @@ async def orm_create_categories(session: AsyncSession, categories: list):
 
 
 
+
 # Добавление и редактирование товаров
 async def orm_add_product(session: AsyncSession, data: dict):
     try:
         obj = Product(
             name=data["name"],
-            sku=data.get("sku"),  # Проверка на наличие SKU
+            sku=data.get("sku"),
             description=data["description"],
             price=float(data["price"]),
             image=data["image"],
@@ -123,10 +127,8 @@ async def orm_delete_product(session: AsyncSession, product_id: int):
 
 # Работа с пользователями
 async def orm_add_user(session: AsyncSession, user_id: int, first_name: str = None, last_name: str = None, phone: str = None):
-    # Проверка существования пользователя
     existing_user = await session.execute(select(User).where(User.user_id == user_id))
     if not existing_user.scalar():
-        # Добавляем пользователя, если его еще нет
         user = User(user_id=user_id, first_name=first_name, last_name=last_name, phone=phone)
         session.add(user)
         await session.commit()
@@ -138,13 +140,7 @@ async def orm_add_to_cart(session: AsyncSession, user_id: int, product_id: int):
     user = (await session.execute(user_query)).scalar()
     if not user:
         session.add(User(user_id=user_id))
-        try:
-            await session.commit()
-            user = (await session.execute(user_query)).scalar()
-        except IntegrityError as e:
-            await session.rollback()
-            logging.error(f"Error adding user: {e}")
-            return None
+        await session.commit()
 
     product_query = select(Product).where(Product.id == product_id)
     product = (await session.execute(product_query)).scalar()
@@ -223,29 +219,61 @@ async def orm_get_products_by_keywords(session: AsyncSession, keywords: str):
     result = await session.execute(query)
     return result.scalars().all()
 
-async def create_order(session: AsyncSession, user_id: int, cart_items):
-    order_number = ''.join(random.choices('0123456789', k=7))
-    new_order = Order(user_id=user_id, order_number=order_number)
-    session.add(new_order)
-    await session.flush()
 
+async def create_order_from_cart(session: AsyncSession, user_id: int):
+    # Генерация номера заказа
+    order_number = ''.join(random.choices('0123456789', k=7))
+    timestamp = datetime.now()
+
+    # Создаем новый заказ
+    new_order = Order(
+        user_id=user_id,
+        order_number=order_number,
+        status="В обработке",
+        created=timestamp,
+        updated=timestamp
+    )
+    session.add(new_order)
+    await session.flush()  # Необходим для получения `new_order.id`
+
+    # Подгружаем корзину пользователя с продуктами
+    cart_query = (
+        select(Cart)
+        .where(Cart.user_id == user_id)
+        .options(selectinload(Cart.product))
+    )
+    cart_items = (await session.execute(cart_query)).scalars().all()
+
+    if not cart_items:
+        return None  # Пустая корзина, возвращаем None
+
+    # Перенос товаров из корзины в заказ
     for item in cart_items:
-        session.add(OrderItem(
+        order_item = OrderItem(
             order_id=new_order.id,
             product_id=item.product_id,
-            quantity=item.stock,
+            stock=item.stock,
             price=item.product.price
-        ))
+        )
+        session.add(order_item)
+        await session.delete(item)  # Удаляем товар из корзины
 
     await session.commit()
     return new_order
 
-async def get_orders(session: AsyncSession):
-    query = select(Order).order_by(Order.created.desc()).options(joinedload(Order.items))
+
+async def get_user_orders(session: AsyncSession, user_id: int):
+    query = select(Order).filter(Order.user_id == user_id).order_by(Order.created.desc())
     result = await session.execute(query)
     return result.scalars().all()
 
+
 async def update_order_status(session: AsyncSession, order_id: int, status: str):
-    query = update(Order).where(Order.id == order_id).values(status=status)
+    query = update(Order).where(Order.id == order_id).values(status=status, updated=datetime.now())
     await session.execute(query)
     await session.commit()
+    return status
+
+
+
+

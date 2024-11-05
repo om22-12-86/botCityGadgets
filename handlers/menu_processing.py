@@ -3,14 +3,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 # Импортируем необходимые функции для работы с базой данных из orm_query
 from database.orm_query import (
+    create_order_from_cart,
+    get_user_orders,
     orm_add_to_cart,
     orm_delete_from_cart,
     orm_get_banner,
     orm_get_categories,
     orm_get_products,
     orm_get_user_carts,
-    orm_reduce_product_in_cart,
-    get_orders
+    orm_reduce_product_in_cart
 )
 
 # Импортируем функции для создания inline-клавиатур
@@ -18,8 +19,7 @@ from kbds.inline import (
     get_products_btns,
     get_user_cart,
     get_user_catalog_btns,
-    get_user_main_btns,
-    get_order_buttons
+    get_user_main_btns
 )
 
 # Импортируем класс для работы с пагинацией (разбиение на страницы)
@@ -176,47 +176,23 @@ async def get_banner(session: AsyncSession, banner_name: str):
 
 
 
-async def create_order(session: AsyncSession, user_id: int, cart_items):
-    # Создаем уникальный номер заказа
-    order_number = ''.join(random.choices('0123456789', k=7))
-    new_order = Order(user_id=user_id, order_number=order_number)
-    session.add(new_order)
-    await session.flush()
-
-    # Переносим товары из корзины в заказ
-    for item in cart_items:
-        order_item = OrderItem(
-            order_id=new_order.id,
-            product_id=item.product_id,
-            quantity=item.stock,
-            price=item.product.price
-        )
-        session.add(order_item)
-    await session.commit()
-    return new_order
 
 
-
-
-
-async def user_orders(session: AsyncSession, user_id: int):
-    orders = await get_orders(session, user_id=user_id)
+async def user_orders(session, user_id):
+    orders = await get_user_orders(session, user_id)
     if not orders:
-        return "У вас нет заказов.", None
+        return "У вас пока нет заказов.", None
 
-    orders_text = []
+    orders_text = "Ваши заказы:\n"
     for order in orders:
-        items = "\n".join([f"{item.product.name} - {item.quantity} шт." for item in order.items])
-        total = sum([item.quantity * item.price for item in order.items])
-        orders_text.append(f"Номер заказа: {order.order_number}\nТовары:\n{items}\nСумма: {total} ₽")
+        orders_text += f"Номер: {order.order_number}\nТовары:\n"
+        for item in order.items:
+            orders_text += f"{item.product.name} - {item.stock} шт.\n"
+        orders_text += f"Сумма: {sum([item.stock * item.price for item in order.items])}₽\nСтатус: {order.status}\n\n"
 
-    banner = await orm_get_banner(session, "user_orders")
-    banner_text = banner.description if banner else "Ваши заказы:"
+    return orders_text, InlineKeyboardMarkup().add(InlineKeyboardButton("На главную 🏠", callback_data="main_menu"))
 
-    return (
-        f"{banner_text}\n\n" + "\n\n".join(orders_text),
-        InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton("На главную 🏠", callback_data="main_menu")]])
-    )
+
 
 
 
@@ -243,5 +219,9 @@ async def get_menu_content(
         return await products(session, level, category, page)
     elif level == 3:
         return await carts(session, level, menu_name, page, user_id, product_id)
-    elif level == 4:  # Новый уровень для заказов пользователя
-        return await user_orders(session, user_id)
+    elif level == 4 and menu_name == "order":
+        # Обрабатываем запрос на просмотр заказов для уровня 4
+        orders_text, keyboard = await user_orders(session, user_id)
+        return orders_text, keyboard
+    else:
+        raise ValueError(f"Unsupported menu level: {level}")
