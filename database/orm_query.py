@@ -220,6 +220,14 @@ async def orm_get_products_by_keywords(session: AsyncSession, keywords: str):
     return result.scalars().all()
 
 
+# database/orm_query.py
+async def get_orders(session: AsyncSession):
+    query = select(Order)  # или другой запрос, если нужно
+    result = await session.execute(query)
+    return result.scalars().all()
+
+
+
 async def create_order_from_cart(session: AsyncSession, user_id: int):
     # Генерация номера заказа
     order_number = ''.join(random.choices('0123456789', k=7))
