@@ -14,13 +14,23 @@ class MenuCallBack(CallbackData, prefix="menu"):
 
 
 
-
-# Обновленная функция для создания кнопок удаления и изменения товара
-def get_product_buttons(category_id, product_id):
+# Функция для создания кнопок с учетом пагинации
+def get_product_buttons(category_id, product_id, pagination_btns, current_page):
     keyboard = InlineKeyboardBuilder()
     keyboard.add(InlineKeyboardButton(text="Удалить", callback_data=f"delete_{product_id}"))
     keyboard.add(InlineKeyboardButton(text="Изменить", callback_data=f"change_{product_id}"))
+
+    # Добавляем кнопки пагинации, если они есть
+    for text, callback_data in pagination_btns.items():
+        keyboard.add(InlineKeyboardButton(text=text, callback_data=callback_data))
+
     return keyboard.adjust(2).as_markup()
+
+
+
+
+
+
 
 
 def get_user_main_btns(*, level: int, sizes: tuple[int] = (2,)):

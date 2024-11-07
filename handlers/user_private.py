@@ -36,8 +36,15 @@ async def show_products_by_category(callback: types.CallbackQuery, session: Asyn
         return
 
     # Создаем объект Paginator с начальной страницей
-    paginator = Paginator(products, page=1)  # Задаем начальную страницу (например, 1)
+    paginator = Paginator(products, page=1, per_page=3)  # Настройте начальную страницу и товары на странице
     page_products = paginator.get_page()  # Получаем товары для текущей страницы
+
+    # Определяем кнопки для пагинации
+    pagination_btns = {}
+    if paginator.has_previous():
+        pagination_btns["◀ Пред."] = f"category_{category_id}_{paginator.page - 1}"
+    if paginator.has_next():
+        pagination_btns["След. ▶"] = f"category_{category_id}_{paginator.page + 1}"
 
     # Перебираем товары на текущей странице и отправляем их пользователю
     for product in page_products:
@@ -50,10 +57,12 @@ async def show_products_by_category(callback: types.CallbackQuery, session: Asyn
                     f"В наличии: {product.stock} шт.\n"
                     f"<b>Товар {paginator.page} из {paginator.pages}</b>",
             parse_mode='HTML',
-            reply_markup=get_product_buttons(category_id, product.id)
+            # Теперь передаем `pagination_btns` и `current_page` в `get_product_buttons`
+            reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
         )
 
     await callback.answer()
+
 
 
 

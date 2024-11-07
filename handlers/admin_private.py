@@ -55,19 +55,31 @@ async def show_products(message: types.Message, session: AsyncSession):
     await message.answer("Выберите категорию или выполните поиск", reply_markup=get_callback_btns(btns=btns))
 
 
+
+
 # Обработчик для показа товаров в категории
 @admin_router.callback_query(F.data.startswith('category_'))
 async def show_category_products(callback: types.CallbackQuery, session: AsyncSession):
-    category_id = int(callback.data.split('_')[-1])
+    data = callback.data.split('_')
+    category_id = int(data[1])
+    page = int(data[2]) if len(data) > 2 else 1  # Устанавливаем текущую страницу
 
-    # Получаем товары для выбранной категории
     products = await orm_get_products(session, category_id)
+    paginator = Paginator(products, page=page, per_page=3)
+    page_products = paginator.get_page()
 
-    # Инициализируем пагинатор
-    paginator = Paginator(products, page=1)  # Задайте начальную страницу или используйте переданное значение
-    page_products = paginator.get_page()  # Получаем товары для текущей страницы
+    # Определяем кнопки пагинации
+    pagination_btns = {}
+    if paginator.has_previous():
+        pagination_btns["◀ Пред."] = f"category_{category_id}_{paginator.page - 1}"
+    if paginator.has_next():
+        pagination_btns["След. ▶"] = f"category_{category_id}_{paginator.page + 1}"
 
-    # Перебираем товары на текущей странице и отправляем их пользователю
+    # Проверка значений pagination_btns и current_page для отладки
+    print("pagination_btns:", pagination_btns)
+    print("current_page:", paginator.page)
+
+    # Отправка товаров с кнопками пагинации
     for product in page_products:
         await callback.message.answer_photo(
             product.image,
@@ -80,10 +92,11 @@ async def show_category_products(callback: types.CallbackQuery, session: AsyncSe
                 f"<b>Товар {paginator.page} из {paginator.pages}</b>"
             ),
             parse_mode='HTML',
-            reply_markup=get_product_buttons(category_id, product.id)
+            reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
         )
 
     await callback.answer("ОК, вот список товаров ⏫")
+
 
 
 
