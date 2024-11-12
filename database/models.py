@@ -34,7 +34,7 @@ class Product(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(150), nullable=False)
-    sku: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)  # Поле SKU (артикул)
+    sku: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
     description: Mapped[str] = mapped_column(Text, nullable=True)
     price: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     image: Mapped[str] = mapped_column(String(150), nullable=True)
@@ -45,6 +45,7 @@ class Product(Base):
     updated: Mapped[DateTime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     category: Mapped['Category'] = relationship('Category', back_populates='products')
+
 
 
 class User(Base):
@@ -59,7 +60,6 @@ class User(Base):
     updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
     orders: Mapped[list["Order"]] = relationship("Order", back_populates="user")
-
 
 
 class Cart(Base):
@@ -77,27 +77,28 @@ class Cart(Base):
 
 
 class Order(Base):
-    __tablename__ = 'order'
+    __tablename__ = 'orders'
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    user_id: Mapped[int] = mapped_column(ForeignKey('user.id'))
-    order_number: Mapped[str] = mapped_column(String, unique=True)
-    status: Mapped[str] = mapped_column(String, default='В обработке')
-    created: Mapped[DateTime] = mapped_column(DateTime, default=datetime.utcnow)
-    updated: Mapped[DateTime] = mapped_column(DateTime, onupdate=datetime.utcnow)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey('user.user_id', ondelete='CASCADE'), nullable=False)
+    order_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default='В обработке')
+    total_cost: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    created: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
+    updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
     user: Mapped["User"] = relationship("User", back_populates="orders")
-    items: Mapped[list["OrderItem"]] = relationship("OrderItem", back_populates="order")
+    items: Mapped[list["OrderItem"]] = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
 
 
 class OrderItem(Base):
     __tablename__ = 'order_item'
 
-    id: Mapped[int] = mapped_column(primary_key=True)
-    order_id: Mapped[int] = mapped_column(ForeignKey('order.id'))
-    product_id: Mapped[int] = mapped_column(ForeignKey('product.id'))
-    stock: Mapped[int] = mapped_column(Integer)
-    price: Mapped[float] = mapped_column(Float)
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey('orders.id', ondelete='CASCADE'), nullable=False)
+    product_id: Mapped[int] = mapped_column(ForeignKey('product.id', ondelete='CASCADE'), nullable=False)
+    stock: Mapped[int] = mapped_column(Integer, nullable=False)
+    price: Mapped[float] = mapped_column(Float, nullable=False)
 
     order: Mapped["Order"] = relationship("Order", back_populates="items")
     product: Mapped["Product"] = relationship("Product")

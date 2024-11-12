@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
 from sqlalchemy.exc import IntegrityError
 import random
+from decimal import Decimal
 from datetime import datetime
 from database.models import Banner, Cart, Category, Product, User, Order, OrderItem
 import logging
@@ -127,6 +128,7 @@ async def orm_delete_product(session: AsyncSession, product_id: int):
 
 # Работа с пользователями
 async def orm_add_user(session: AsyncSession, user_id: int, first_name: str = None, last_name: str = None, phone: str = None):
+    """Добавление пользователя в базу данных, если он отсутствует."""
     existing_user = await session.execute(select(User).where(User.user_id == user_id))
     if not existing_user.scalar():
         user = User(user_id=user_id, first_name=first_name, last_name=last_name, phone=phone)
@@ -136,20 +138,20 @@ async def orm_add_user(session: AsyncSession, user_id: int, first_name: str = No
 
 # Работа с корзинами
 async def orm_add_to_cart(session: AsyncSession, user_id: int, product_id: int):
-    user_query = select(User).where(User.user_id == user_id)
-    user = (await session.execute(user_query)).scalar()
+    """Добавление товара в корзину пользователя."""
+    result = await session.execute(select(User).where(User.user_id == user_id))
+    user = result.scalar()
     if not user:
         session.add(User(user_id=user_id))
         await session.commit()
 
-    product_query = select(Product).where(Product.id == product_id)
-    product = (await session.execute(product_query)).scalar()
+    result = await session.execute(select(Product).where(Product.id == product_id))
+    product = result.scalar()
     if not product or product.stock <= 0:
         return None
 
-    cart_query = select(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id)
-    cart_item = (await session.execute(cart_query)).scalar()
-
+    result = await session.execute(select(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id))
+    cart_item = result.scalar()
     if cart_item:
         if cart_item.stock < product.stock:
             cart_item.stock += 1
@@ -162,18 +164,19 @@ async def orm_add_to_cart(session: AsyncSession, user_id: int, product_id: int):
     product.stock -= 1
     try:
         await session.commit()
+        return cart_item
     except IntegrityError as e:
         await session.rollback()
         logging.error(f"Error adding to cart: {e}")
         return None
-    return cart_item
 
 
 
 
 
 
-async def orm_get_user_carts(session: AsyncSession, user_id):
+async def orm_get_user_carts(session: AsyncSession, user_id: int):
+    """Получение корзины пользователя с деталями о продуктах."""
     query = select(Cart).filter(Cart.user_id == user_id).options(joinedload(Cart.product))
     result = await session.execute(query)
     return result.scalars().all()
@@ -181,34 +184,34 @@ async def orm_get_user_carts(session: AsyncSession, user_id):
 async def orm_delete_from_cart(session: AsyncSession, user_id: int, product_id: int):
     query = delete(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id)
     await session.execute(query)
-    await session.commit()
+    await session.commit()  # Убедитесь, что коммит вызывается
+
+
+
 
 # Ваша функция orm_reduce_product_in_cart
 async def orm_reduce_product_in_cart(session: AsyncSession, user_id: int, product_id: int):
-    # Получаем элемент корзины
-    cart_query = select(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id)
-    cart_result = await session.execute(cart_query)
-    cart = cart_result.scalar()
+    """Уменьшение количества товара в корзине пользователя."""
+    result = await session.execute(select(Cart).where(Cart.user_id == user_id, Cart.product_id == product_id))
+    cart = result.scalar()
     if not cart:
-        return  # Выходим, если элемента в корзине нет
+        return
 
-    # Уменьшаем количество товара в корзине
     if cart.stock > 1:
         cart.stock -= 1
-        await session.commit()  # Фиксируем изменения
+        await session.commit()
     else:
-        await orm_delete_from_cart(session, user_id, product_id)  # Удаляем товар из корзины, если он был последний
+        await orm_delete_from_cart(session, user_id, product_id)
 
-    # Обновляем количество товара на складе
-    product_query = select(Product).where(Product.id == product_id)
-    product_result = await session.execute(product_query)
-    product = product_result.scalar()
+    result = await session.execute(select(Product).where(Product.id == product_id))
+    product = result.scalar()
     if product:
-        product.stock += 1  # Возвращаем товар на склад
-        await session.commit()  # Фиксируем изменения в базе данных
+        product.stock += 1
+        await session.commit()
 
 
 async def orm_get_products_by_keywords(session: AsyncSession, keywords: str):
+    """Поиск продуктов по ключевым словам."""
     keyword_list = keywords.split()
     query = select(Product).where(
         or_(
@@ -220,6 +223,8 @@ async def orm_get_products_by_keywords(session: AsyncSession, keywords: str):
     return result.scalars().all()
 
 
+
+
 # database/orm_query.py
 async def get_orders(session: AsyncSession):
     query = select(Order)  # или другой запрос, если нужно
@@ -227,60 +232,118 @@ async def get_orders(session: AsyncSession):
     return result.scalars().all()
 
 
-
 async def create_order_from_cart(session: AsyncSession, user_id: int):
-    # Генерация номера заказа
-    order_number = ''.join(random.choices('0123456789', k=7))
-    timestamp = datetime.now()
+    # Перемещение импорта внутрь функции для предотвращения циклического импорта
+    from database.orm_query import orm_get_user_carts, orm_clear_user_cart
 
-    # Создаем новый заказ
-    new_order = Order(
-        user_id=user_id,
-        order_number=order_number,
-        status="В обработке",
-        created=timestamp,
-        updated=timestamp
-    )
-    session.add(new_order)
-    await session.flush()  # Необходим для получения `new_order.id`
+    try:
+        # Получение корзины пользователя
+        carts = await orm_get_user_carts(session, user_id)
+        if not carts:
+            raise ValueError("Корзина пользователя пуста.")
 
-    # Подгружаем корзину пользователя с продуктами
-    cart_query = (
-        select(Cart)
-        .where(Cart.user_id == user_id)
-        .options(selectinload(Cart.product))
-    )
-    cart_items = (await session.execute(cart_query)).scalars().all()
-
-    if not cart_items:
-        return None  # Пустая корзина, возвращаем None
-
-    # Перенос товаров из корзины в заказ
-    for item in cart_items:
-        order_item = OrderItem(
-            order_id=new_order.id,
-            product_id=item.product_id,
-            stock=item.stock,
-            price=item.product.price
+        # Создание нового заказа
+        order_number = ''.join(random.choices('0123456789', k=7))
+        order = Order(
+            user_id=user_id,
+            order_number=order_number,
+            status="В обработке",
+            total_cost=Decimal(0),
+            created=datetime.now(),
+            updated=datetime.now()
         )
-        session.add(order_item)
-        await session.delete(item)  # Удаляем товар из корзины
+        session.add(order)
+        await session.flush()  # Присваиваем ID заказу и отправляем изменения в БД
+        logging.info(f"Создан заказ с ID: {order.id}")
 
+        # Проверка ID заказа перед коммитом
+        if not order.id:
+            raise ValueError("Не удалось создать заказ. ID заказа отсутствует.")
+
+        # Перенос элементов корзины в заказ
+        total_cost = Decimal(0)
+        for cart in carts:
+            order_item = OrderItem(
+                order_id=order.id,  # Используем ID созданного заказа
+                product_id=cart.product_id,
+                stock=cart.stock,
+                price=cart.product.price
+            )
+            session.add(order_item)
+            total_cost += Decimal(cart.stock) * Decimal(cart.product.price)
+
+        # Обновление стоимости заказа
+        order.total_cost = total_cost
+        await session.commit()  # Коммит всех изменений
+
+        # Очистка корзины пользователя
+        await orm_clear_user_cart(session, user_id)
+        logging.info(f"Заказ с номером {order_number} успешно создан для пользователя {user_id}")
+
+        return order
+
+    except (IntegrityError, ValueError) as e:
+        logging.error(f"Ошибка при создании заказа: {e}")
+        await session.rollback()  # Откат транзакции при ошибке
+        raise e
+
+
+
+
+
+
+async def orm_clear_user_cart(session: AsyncSession, user_id: int):
+    query = delete(Cart).where(Cart.user_id == user_id)
+    await session.execute(query)
     await session.commit()
-    return new_order
+
+
+
+
+
+async def update_order(session: AsyncSession, order_id: int, new_status: str, total_cost: float = None):
+    update_query = (
+        update(Order)
+        .where(Order.id == order_id)
+        .values(
+            status=new_status,
+            updated=datetime.now()
+        )
+    )
+
+    if total_cost is not None:
+        update_query = update_query.values(total_cost=total_cost)
+
+    await session.execute(update_query)
+    await session.commit()
+
+async def update_order_status(session: AsyncSession, order_id: int, status: str):
+    """Обновление статуса заказа."""
+    query = update(Order).where(Order.id == order_id).values(status=status, updated=datetime.now())
+    await session.execute(query)
+    await session.commit()
+    return status
 
 
 async def get_user_orders(session: AsyncSession, user_id: int):
     query = select(Order).filter(Order.user_id == user_id).order_by(Order.created.desc())
     result = await session.execute(query)
-    return result.scalars().all()
+    orders = result.scalars().all()
+
+    if not orders:
+        return "У вас нет заказов.", None
+
+    # Формирование текста для вывода информации о заказах
+    order_texts = []
+    for order in orders:
+        order_texts.append(
+            f"Заказ #{order.order_number}, статус: {order.status}, сумма: {order.total_cost} ₽, создан: {order.created}"
+        )
+
+    return "\n\n".join(order_texts), None
 
 
-async def update_order_status(session: AsyncSession, order_id: int, status: str):
-    query = update(Order).where(Order.id == order_id).values(status=status, updated=datetime.now())
-    await session.execute(query)
-    await session.commit()
-    return status
+
 
 
 
