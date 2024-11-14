@@ -233,9 +233,7 @@ async def get_orders(session: AsyncSession):
 
 
 async def create_order_from_cart(session: AsyncSession, user_id: int):
-    # Перемещение импорта внутрь функции для предотвращения циклического импорта
     from database.orm_query import orm_get_user_carts, orm_clear_user_cart
-
     try:
         # Получение корзины пользователя
         carts = await orm_get_user_carts(session, user_id)
@@ -253,12 +251,12 @@ async def create_order_from_cart(session: AsyncSession, user_id: int):
             updated=datetime.now()
         )
         session.add(order)
-        await session.flush()  # Присваиваем ID заказу и отправляем изменения в БД
-        logging.info(f"Создан заказ с ID: {order.id}")
+        await session.flush()  # Получаем ID созданного заказа, не фиксируя транзакцию
 
-        # Проверка ID заказа перед коммитом
+        # Проверка создания заказа
         if not order.id:
             raise ValueError("Не удалось создать заказ. ID заказа отсутствует.")
+        logging.info(f"Создан заказ с ID: {order.id}")
 
         # Перенос элементов корзины в заказ
         total_cost = Decimal(0)
@@ -274,17 +272,21 @@ async def create_order_from_cart(session: AsyncSession, user_id: int):
 
         # Обновление стоимости заказа
         order.total_cost = total_cost
-        await session.commit()  # Коммит всех изменений
 
-        # Очистка корзины пользователя
+        # Коммит изменений заказа и добавленных элементов
+        await session.commit()
+
+        # Очистка корзины пользователя после фиксации заказа
         await orm_clear_user_cart(session, user_id)
-        logging.info(f"Заказ с номером {order_number} успешно создан для пользователя {user_id}")
+        await session.commit()  # Фиксация очистки корзины
+
+        logging.info(f"Заказ с номером {order_number} успешно создан и корзина очищена для пользователя {user_id}")
 
         return order
 
     except (IntegrityError, ValueError) as e:
         logging.error(f"Ошибка при создании заказа: {e}")
-        await session.rollback()  # Откат транзакции при ошибке
+        await session.rollback()
         raise e
 
 
@@ -293,9 +295,17 @@ async def create_order_from_cart(session: AsyncSession, user_id: int):
 
 
 async def orm_clear_user_cart(session: AsyncSession, user_id: int):
-    query = delete(Cart).where(Cart.user_id == user_id)
-    await session.execute(query)
-    await session.commit()
+    try:
+        query = delete(Cart).where(Cart.user_id == user_id)
+        result = await session.execute(query)
+        await session.commit()  # Коммит для фиксации изменений
+        logging.info(f"Удалено {result.rowcount} строк из корзины пользователя {user_id}")
+    except Exception as e:
+        logging.error(f"Ошибка при очистке корзины пользователя {user_id}: {e}")
+        await session.rollback()
+        raise e
+
+
 
 
 
@@ -344,6 +354,22 @@ async def get_user_orders(session: AsyncSession, user_id: int):
 
 
 
+
+async def display_orders_to_user(session: AsyncSession, user_id: int):
+    query = select(Order).filter(Order.user_id == user_id).order_by(Order.created.desc())
+    result = await session.execute(query)
+    orders = result.scalars().all()
+
+    if not orders:
+        return "У вас нет заказов.", None
+
+    order_texts = []
+    for order in orders:
+        order_texts.append(
+            f"Заказ #{order.order_number}, статус: {order.status}, сумма: {order.total_cost} ₽, создан: {order.created}"
+        )
+
+    return "\n\n".join(order_texts), None
 
 
 

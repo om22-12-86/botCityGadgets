@@ -5,7 +5,7 @@ from sqlalchemy import select
 from database.models import Banner, Cart, Category, Product, User
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
-from database.orm_query import orm_add_to_cart, orm_add_user, orm_get_products_by_keywords, orm_get_products, orm_get_user_carts, create_order_from_cart, get_user_orders
+from database.orm_query import orm_add_to_cart, orm_add_user, orm_get_products_by_keywords, orm_get_products, orm_get_user_carts, create_order_from_cart, get_user_orders, display_orders_to_user
 from filters.chat_types import ChatTypeFilter
 from handlers.menu_processing import get_menu_content, carts# Импортируем функции
 from kbds.inline import MenuCallBack, get_product_buttons, get_user_products_btns
@@ -227,7 +227,11 @@ async def handle_create_order(callback: CallbackQuery, session: AsyncSession):
     await callback.answer()
 
 @user_private_router.callback_query(F.data == "view_orders")
-async def handle_view_orders(callback: CallbackQuery, session: AsyncSession):
-    orders_text, keyboard = await user_orders(session, callback.from_user.id)
-    await callback.message.answer(orders_text, reply_markup=keyboard)
+async def handle_view_orders(callback: types.CallbackQuery, session: AsyncSession):
+    orders_text, keyboard = await get_user_orders(session, callback.from_user.id)
+    if orders_text:
+        await callback.message.answer(orders_text, reply_markup=keyboard)
+    else:
+        await callback.message.answer("У вас нет активных заказов.")
     await callback.answer()
+
