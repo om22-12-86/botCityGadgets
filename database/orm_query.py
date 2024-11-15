@@ -232,20 +232,30 @@ async def get_orders(session: AsyncSession):
     return result.scalars().all()
 
 
-async def create_order_from_cart(session: AsyncSession, user_id: int):
-    from database.orm_query import orm_get_user_carts, orm_clear_user_cart
+# Оповещение пользователя о создании заказа
+async def send_order_notification(bot, user_id, order_number):
+    """Отправка уведомления пользователю о создании заказа."""
+    message = f"Ваш заказ с номером {order_number} был успешно создан.\n" \
+              f"Статус: В обработке."
+    await bot.send_message(user_id, message)
+
+
+# Функция для создания заказа
+async def create_order_from_cart(session: AsyncSession, user_id: int, bot):
     try:
         # Получение корзины пользователя
         carts = await orm_get_user_carts(session, user_id)
         if not carts:
             raise ValueError("Корзина пользователя пуста.")
 
-        # Создание нового заказа
+        # Генерация уникального номера заказа
         order_number = ''.join(random.choices('0123456789', k=7))
+
+        # Создание нового заказа
         order = Order(
             user_id=user_id,
             order_number=order_number,
-            status="В обработке",
+            status="В обработке",  # Статус по умолчанию
             total_cost=Decimal(0),
             created=datetime.now(),
             updated=datetime.now()
@@ -258,7 +268,7 @@ async def create_order_from_cart(session: AsyncSession, user_id: int):
             raise ValueError("Не удалось создать заказ. ID заказа отсутствует.")
         logging.info(f"Создан заказ с ID: {order.id}")
 
-        # Перенос элементов корзины в заказ
+        # Перенос элементов из корзины в заказ и расчет общей стоимости
         total_cost = Decimal(0)
         for cart in carts:
             order_item = OrderItem(
@@ -282,13 +292,15 @@ async def create_order_from_cart(session: AsyncSession, user_id: int):
 
         logging.info(f"Заказ с номером {order_number} успешно создан и корзина очищена для пользователя {user_id}")
 
+        # Отправка уведомления пользователю
+        await send_order_notification(bot, user_id, order_number)
+
         return order
 
     except (IntegrityError, ValueError) as e:
         logging.error(f"Ошибка при создании заказа: {e}")
         await session.rollback()
         raise e
-
 
 
 

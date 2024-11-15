@@ -390,29 +390,28 @@ async def admin_search_products(message: types.Message, session: AsyncSession, s
 
 
 # Обработчик кнопки "Заказы"
-@admin_router.message(F.text == "Заказы")
+@admin_router.message(F.text == 'Заказы')
 async def show_orders(message: types.Message, session: AsyncSession):
+    # Получаем список всех заказов
     orders = await get_orders(session)
+
     if not orders:
-        await message.answer("Пока нет заказов.")
+        await message.answer("Нет заказов.")
         return
 
+    # Отображаем информацию о заказах
     for order in orders:
-        items = "\n".join([f"{item.product.name} - {item.stock} шт." for item in order.items])
-        total = sum([item.stock * item.price for item in order.items])
+        status_text = f"Статус: {order.status}"
+        # Кнопки для изменения статуса
+        buttons = [
+            InlineKeyboardButton("Назад", callback_data=f"order_{order.id}_back"),
+            InlineKeyboardButton("Отмена", callback_data=f"order_{order.id}_cancel"),
+            InlineKeyboardButton("Готов", callback_data=f"order_{order.id}_ready"),
+            InlineKeyboardButton("Выдан", callback_data=f"order_{order.id}_delivered")
+        ]
+        keyboard = InlineKeyboardMarkup(row_width=2).add(*buttons)
 
-        buttons = InlineKeyboardMarkup().add(
-            InlineKeyboardButton("Отмена", callback_data=f"cancel_order_{order.id}"),
-            InlineKeyboardButton("Готов", callback_data=f"ready_order_{order.id}"),
-            InlineKeyboardButton("Выдан", callback_data=f"delivered_order_{order.id}")
-        )
-
-        await message.answer(
-            f"Заказ #{order.order_number}\nПользователь ID: {order.user_id}\nСтатус: {order.status}\nТовары:\n{items}\nСумма: {total} ₽",
-            reply_markup=buttons
-        )
-
-
+        await message.answer(f"Заказ № {order.order_number}\n{status_text}", reply_markup=keyboard)
 
 
 # Обработчики изменения статуса заказа
@@ -462,57 +461,58 @@ async def view_orders(callback: types.CallbackQuery, session: AsyncSession):
 
 
 
-@admin_router.callback_query(F.data.startswith("cancel_order_"))
+# Обработчик изменения статуса заказа
+@admin_router.callback_query(F.data.startswith('order_cancel_'))
 async def cancel_order(callback: types.CallbackQuery, session: AsyncSession):
-    order_id = int(callback.data.split("_")[-1])
+    order_id = int(callback.data.split('_')[2])
     await update_order_status(session, order_id, "Отменен")
-    await callback.answer("Заказ отменен.")
-    await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} отменен.")
+    await callback.answer("Статус заказа обновлен на 'Отменен'")
 
-@admin_router.callback_query(F.data.startswith("ready_order_"))
+@admin_router.callback_query(F.data.startswith('order_ready_'))
 async def ready_order(callback: types.CallbackQuery, session: AsyncSession):
-    order_id = int(callback.data.split("_")[-1])
+    order_id = int(callback.data.split('_')[2])
     await update_order_status(session, order_id, "Готов")
-    await callback.answer("Заказ готов к получению.")
-    await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} готов к получению.")
+    await callback.answer("Статус заказа обновлен на 'Готов'")
 
-@admin_router.callback_query(F.data.startswith("delivered_order_"))
+@admin_router.callback_query(F.data.startswith('order_delivered_'))
 async def delivered_order(callback: types.CallbackQuery, session: AsyncSession):
-    order_id = int(callback.data.split("_")[-1])
+    order_id = int(callback.data.split('_')[2])
     await update_order_status(session, order_id, "Выдан")
-    await callback.answer("Заказ выдан.")
-    await bot.send_message(callback.from_user.id, f"Ваш заказ #{order_id} выдан.")
+    await callback.answer("Статус заказа обновлен на 'Выдан'")
 
 
+@admin_router.callback_query(F.data.startswith('order_'))
+async def change_order_status(callback: types.CallbackQuery, session: AsyncSession):
+    # Извлекаем информацию из callback_data
+    _, order_id, action = callback.data.split('_')
+    order_id = int(order_id)
 
-@admin_router.callback_query(F.data.startswith("update_order_"))
-async def admin_update_order_status(callback: types.CallbackQuery, session: AsyncSession):
-    data = callback.data.split("_")
-    action, order_id = data[1], int(data[2])
+    # Получаем заказ
+    order = await orm_get_order_by_id(session, order_id)
 
-    status_map = {
-        "cancel": "Отменен",
-        "ready": "Готов",
-        "delivered": "Выдан"
-    }
-    new_status = status_map.get(action)
+    if not order:
+        await callback.answer("Заказ не найден.")
+        return
 
-    if new_status:
-        status = await update_order_status(session, order_id, new_status)
-        await callback.answer(f"Статус заказа обновлен на: {status}")
+    # Обновляем статус заказа в зависимости от действия
+    if action == "cancel":
+        order.status = "Отменён"
+    elif action == "ready":
+        order.status = "Готов"
+    elif action == "delivered":
+        order.status = "Выдан"
 
-        # Уведомление пользователя об изменении статуса
-        user_message = {
-            "cancel": f"Ваш заказ #{order_id} отменен.",
-            "ready": f"Ваш заказ #{order_id} готов к получению!",
-            "delivered": f"Ваш заказ #{order_id} выдан."
-        }.get(action, "Изменение статуса.")
+    # Сохраняем изменения в базе данных
+    order.updated = datetime.now()
+    session.add(order)
+    await session.commit()
 
-        await bot.send_message(callback.from_user.id, user_message)
+    # Подтверждение для администратора
+    await callback.answer(f"Статус заказа № {order.order_number} изменён на: {order.status}")
 
-    await callback.answer()
-
-
+    # Отправляем обновление пользователю
+    user = await orm_get_user_by_id(session, order.user_id)
+    await send_order_notification(bot, user.id, order.order_number)
 
 
 # Обработчик для загрузки файла Excel

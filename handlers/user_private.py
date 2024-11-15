@@ -11,6 +11,7 @@ from handlers.menu_processing import get_menu_content, carts# Импортиру
 from kbds.inline import MenuCallBack, get_product_buttons, get_user_products_btns
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from utils.paginator import Paginator
+from aiogram import Bot
 
 
 
@@ -210,12 +211,44 @@ async def go_to_main_menu(callback: types.CallbackQuery, session: AsyncSession):
     await callback.answer("Вы вернулись в главное меню.")
 
 
+@user_private_router.message(F.text == "Заказать")
+async def create_order(message: types.Message, session: AsyncSession, user_id: int):
+    # Создаём заказ на основе данных из корзины
+    cart_items = await orm_get_user_carts(session, user_id)
+    if not cart_items:
+        await message.answer("Ваша корзина пуста!")
+        return
+
+    # Создаем заказ
+    order_number = random.randint(100000, 999999)  # Генерация номера заказа
+    order = await create_order_from_cart(session, user_id, cart_items, order_number)
+
+    # Уведомляем пользователя
+    await message.answer(f"Ваш заказ №{order_number} успешно создан! Ожидайте обновления статуса.")
+
+    # Очищаем корзину
+    await orm_clear_user_cart(session, user_id)
+
+
+@user_private_router.message(F.text == "Заказы 📝")
+async def show_user_orders(message: types.Message, session: AsyncSession, user_id: int):
+    orders = await get_user_orders(session, user_id)
+    if not orders:
+        await message.answer("У вас нет заказов.")
+        return
+
+    for order in orders:
+        order_text = f"Заказ №{order.order_number}\nСтатус: {order.status}\nСоздан: {order.created}\n"
+        await message.answer(order_text)
+
+
 
 
 @user_private_router.callback_query(F.data == "order")
-async def handle_create_order(callback: CallbackQuery, session: AsyncSession):
+async def handle_create_order(callback: CallbackQuery, session: AsyncSession, bot: Bot):
     user_id = callback.from_user.id
-    order = await create_order_from_cart(session, user_id)
+    # Передаем bot в функцию create_order_from_cart
+    order = await create_order_from_cart(session, user_id, bot)
 
     if order:
         await callback.message.answer(
@@ -225,6 +258,7 @@ async def handle_create_order(callback: CallbackQuery, session: AsyncSession):
     else:
         await callback.message.answer("Ваша корзина пуста.")
     await callback.answer()
+
 
 @user_private_router.callback_query(F.data == "view_orders")
 async def handle_view_orders(callback: types.CallbackQuery, session: AsyncSession):
