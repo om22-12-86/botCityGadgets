@@ -219,7 +219,7 @@ async def get_menu_content(
         return await products(session, level, category, page)
     elif level == 3:
         return await carts(session, level, menu_name, page, user_id, product_id)
-    elif level == 4 and menu_name == "order":
+    elif level == 4 and menu_name == "orders":
         # Обрабатываем запрос на просмотр заказов для уровня 4
         orders_text, keyboard = await user_orders(session, user_id)
         return orders_text, keyboard

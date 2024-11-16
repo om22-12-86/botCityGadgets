@@ -438,6 +438,28 @@ async def handle_order_action(callback: types.CallbackQuery, session: AsyncSessi
         await bot.send_message(user_id, user_message[action])
 
 
+@admin_router.message(Command("orders"))
+async def handle_orders(message: types.Message, session: AsyncSession):
+    # Получаем все заказы из базы данных
+    orders = await get_orders(session)
+
+    if not orders:
+        await message.answer("Нет заказов.")
+        return
+
+    # Для каждого заказа создаем кнопки
+    for order in orders:
+        # Кнопка для изменения статуса заказа
+        buttons = [
+            InlineKeyboardButton("Изменить статус", callback_data=f"change_status_{order.id}")
+        ]
+        keyboard = InlineKeyboardMarkup(row_width=1).add(*buttons)
+
+        # Отправляем информацию о заказе с клавиатурой
+        await message.answer(f"Заказ #{order.id} от пользователя {order.user_id}\nСтатус: {order.status}",
+                             reply_markup=keyboard)
+
+
 
 
 @admin_router.callback_query(F.data == "view_orders")
@@ -481,38 +503,25 @@ async def delivered_order(callback: types.CallbackQuery, session: AsyncSession):
     await callback.answer("Статус заказа обновлен на 'Выдан'")
 
 
-@admin_router.callback_query(F.data.startswith('order_'))
-async def change_order_status(callback: types.CallbackQuery, session: AsyncSession):
-    # Извлекаем информацию из callback_data
-    _, order_id, action = callback.data.split('_')
-    order_id = int(order_id)
+@admin_router.callback_query(lambda c: c.data and c.data.startswith("change_status_"))
+async def handle_status_change(callback_query: types.CallbackQuery, session: AsyncSession):
+    # Извлекаем ID заказа из callback_data
+    order_id = int(callback_query.data.split("_")[2])
 
-    # Получаем заказ
-    order = await orm_get_order_by_id(session, order_id)
+    # Получаем заказ из базы данных
+    order = await get_order_by_id(session, order_id)
 
     if not order:
-        await callback.answer("Заказ не найден.")
+        await callback_query.answer("Этот заказ не найден.")
         return
 
-    # Обновляем статус заказа в зависимости от действия
-    if action == "cancel":
-        order.status = "Отменён"
-    elif action == "ready":
-        order.status = "Готов"
-    elif action == "delivered":
-        order.status = "Выдан"
+    # Предлагаем изменить статус
+    new_status = "Выполнен" if order.status != "Выполнен" else "Отменен"
+    await update_order_status(session, order_id, new_status)
 
-    # Сохраняем изменения в базе данных
-    order.updated = datetime.now()
-    session.add(order)
-    await session.commit()
+    await callback_query.answer(f"Статус заказа #{order_id} изменен на {new_status}.")
 
-    # Подтверждение для администратора
-    await callback.answer(f"Статус заказа № {order.order_number} изменён на: {order.status}")
 
-    # Отправляем обновление пользователю
-    user = await orm_get_user_by_id(session, order.user_id)
-    await send_order_notification(bot, user.id, order.order_number)
 
 
 # Обработчик для загрузки файла Excel

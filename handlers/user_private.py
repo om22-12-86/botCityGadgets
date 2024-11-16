@@ -1,5 +1,6 @@
 from aiogram import F, types, Router
 from aiogram.filters import CommandStart
+from aiogram.filters import Command
 from aiogram.fsm.state import StatesGroup, State
 from sqlalchemy import select
 from database.models import Banner, Cart, Category, Product, User
@@ -109,6 +110,12 @@ async def user_menu(callback: types.CallbackQuery, callback_data: MenuCallBack, 
         return
     if callback_data.menu_name == "add_to_cart":
         await add_to_cart(callback, callback_data, session)
+        return
+    if callback_data.menu_name == "orders":  # Новая кнопка для заказов
+        # Выводим заказы пользователя
+        orders_text, keyboard = await get_user_orders(session, callback.from_user.id)
+        await callback.message.answer(orders_text, reply_markup=keyboard)
+        await callback.answer()
         return
 
     # Получаем содержимое меню
@@ -230,16 +237,26 @@ async def create_order(message: types.Message, session: AsyncSession, user_id: i
     await orm_clear_user_cart(session, user_id)
 
 
+
 @user_private_router.message(F.text == "Заказы 📝")
 async def show_user_orders(message: types.Message, session: AsyncSession, user_id: int):
+    """Показать все заказы пользователя в чате бота."""
     orders = await get_user_orders(session, user_id)
     if not orders:
         await message.answer("У вас нет заказов.")
         return
 
+    message = "Ваши заказы:\n"
     for order in orders:
-        order_text = f"Заказ №{order.order_number}\nСтатус: {order.status}\nСоздан: {order.created}\n"
-        await message.answer(order_text)
+        message += f"Заказ №{order.order_number}, Статус: {order.status}, Общая стоимость: {order.total_cost} ₽\n"
+        for item in order.items:
+            product = item.product
+            message += f"  - {product.name} (Количество: {item.stock}, Цена: {item.price} ₽)\n"
+        message += "\n"
+
+    await message.answer(message)
+
+
 
 
 
@@ -268,4 +285,18 @@ async def handle_view_orders(callback: types.CallbackQuery, session: AsyncSessio
     else:
         await callback.message.answer("У вас нет активных заказов.")
     await callback.answer()
+
+
+@user_private_router.message(Command("orders"))
+async def handle_user_orders(message: types.Message, session: AsyncSession, user: User):
+    # Получаем заказы пользователя из базы данных
+    orders = await get_user_orders(session, user.id)
+
+    if not orders:
+        await message.answer("У вас нет заказов.")
+        return
+
+    # Для каждого заказа отправляем информацию о его статусе
+    for order in orders:
+        await message.answer(f"Заказ #{order.id}\nСтатус: {order.status}")
 

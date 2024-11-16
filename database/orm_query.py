@@ -1,4 +1,5 @@
 from sqlalchemy import or_
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
@@ -223,13 +224,21 @@ async def orm_get_products_by_keywords(session: AsyncSession, keywords: str):
     return result.scalars().all()
 
 
-
-
-# database/orm_query.py
-async def get_orders(session: AsyncSession):
-    query = select(Order)  # или другой запрос, если нужно
+async def orm_get_user_orders(session: AsyncSession, user_id: int):
+    """Получение всех заказов пользователя с их деталями."""
+    query = select(Order).filter(Order.user_id == user_id).options(selectinload(Order.items))  # Загрузка элементов заказа
     result = await session.execute(query)
     return result.scalars().all()
+
+
+
+# Функция для получения всех заказов
+async def get_orders(session: AsyncSession):
+    query = select(Order).options(selectinload(Order.user))
+    result = await session.execute(query)
+    return result.scalars().all()
+
+
 
 
 # Оповещение пользователя о создании заказа
@@ -262,11 +271,6 @@ async def create_order_from_cart(session: AsyncSession, user_id: int, bot):
         )
         session.add(order)
         await session.flush()  # Получаем ID созданного заказа, не фиксируя транзакцию
-
-        # Проверка создания заказа
-        if not order.id:
-            raise ValueError("Не удалось создать заказ. ID заказа отсутствует.")
-        logging.info(f"Создан заказ с ID: {order.id}")
 
         # Перенос элементов из корзины в заказ и расчет общей стоимости
         total_cost = Decimal(0)
@@ -347,22 +351,34 @@ async def update_order_status(session: AsyncSession, order_id: int, status: str)
     return status
 
 
+# Если заказов нет, выводим сообщение, если есть — список заказов
+
 async def get_user_orders(session: AsyncSession, user_id: int):
-    query = select(Order).filter(Order.user_id == user_id).order_by(Order.created.desc())
-    result = await session.execute(query)
+    """Функция для получения заказов пользователя"""
+    # Выполняем запрос к базе данных для получения заказов пользователя
+    result = await session.execute(
+        select(Order).filter_by(user_id=user_id).options(selectinload(Order.items).selectinload(OrderItem.product))
+    )
     orders = result.scalars().all()
 
     if not orders:
-        return "У вас нет заказов.", None
+        return "У вас нет активных заказов.", None
 
-    # Формирование текста для вывода информации о заказах
-    order_texts = []
+    # Формируем текст с заказами
+    orders_text = "Ваши заказы:\n"
     for order in orders:
-        order_texts.append(
-            f"Заказ #{order.order_number}, статус: {order.status}, сумма: {order.total_cost} ₽, создан: {order.created}"
-        )
+        orders_text += f"Заказ №{order.order_number}\nСтатус: {order.status}\nОбщая стоимость: {order.total_cost} ₽\n"
+        for item in order.items:
+            product = item.product
+            orders_text += f"{product.name} (Количество: {item.stock}, Цена: {item.price} ₽)\n"
+        orders_text += "\n"
 
-    return "\n\n".join(order_texts), None
+    # Кнопка для возврата к главному меню
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="На главную 🏠", callback_data="main_menu")]
+    ])
+
+    return orders_text, keyboard
 
 
 
