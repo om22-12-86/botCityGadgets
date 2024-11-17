@@ -4,8 +4,11 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from utils.paginator import Paginator
 from sqlalchemy.ext.asyncio import AsyncSession
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+
 
 from database.orm_query import (
+    get_user_by_id,
     update_order_status,
     get_orders,
     orm_change_banner_image,
@@ -17,6 +20,7 @@ from database.orm_query import (
     orm_get_products,
     orm_update_product,
     orm_get_products_by_keywords,
+    get_all_orders,
 )
 
 from filters.chat_types import ChatTypeFilter, IsAdmin
@@ -401,41 +405,80 @@ async def show_orders(message: types.Message, session: AsyncSession):
 
     # Отображаем информацию о заказах
     for order in orders:
+        # Получаем данные о пользователе (предполагается, что метод get_user_by_id существует)
+        user = await get_user_by_id(session, order.user_id)
+        user_info = f"Пользователь: {user.first_name} {user.last_name} (ID: {user.user_id})" if user else "Пользователь: Неизвестен"
+
         status_text = f"Статус: {order.status}"
+
         # Кнопки для изменения статуса
         buttons = [
-            InlineKeyboardButton("Назад", callback_data=f"order_{order.id}_back"),
-            InlineKeyboardButton("Отмена", callback_data=f"order_{order.id}_cancel"),
-            InlineKeyboardButton("Готов", callback_data=f"order_{order.id}_ready"),
-            InlineKeyboardButton("Выдан", callback_data=f"order_{order.id}_delivered")
+            InlineKeyboardButton(text="Отмена", callback_data=f"order_{order.id}_cancel"),
+            InlineKeyboardButton(text="Готов", callback_data=f"order_{order.id}_ready"),
+            InlineKeyboardButton(text="Выдан", callback_data=f"order_{order.id}_delivered")
         ]
-        keyboard = InlineKeyboardMarkup(row_width=2).add(*buttons)
 
-        await message.answer(f"Заказ № {order.order_number}\n{status_text}", reply_markup=keyboard)
+        # Создаем клавиатуру только если есть кнопки
+        if buttons:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[[button] for button in buttons])
+            await message.answer(
+                f"Заказ № {order.order_number}\n"
+                f"{user_info}\n"
+                f"{status_text}",
+                reply_markup=keyboard
+            )
+        else:
+            await message.answer(
+                f"Заказ № {order.order_number}\n"
+                f"{user_info}\n"
+                f"{status_text}\n(Нет доступных действий)"
+            )
+
+
+# Добавьте команду или callback для обработки отображения всех заказов
+@admin_router.message(Command("orders"))
+async def show_all_orders(message: types.Message, session: AsyncSession):
+    """Показ всех заказов для администратора."""
+    orders_text, keyboard = await get_all_orders(session)
+    if not orders_text:
+        await message.answer("Нет доступных заказов.")
+    else:
+        await message.answer(orders_text, reply_markup=keyboard)
+
 
 
 # Обработчики изменения статуса заказа
 @admin_router.callback_query(F.data.startswith("order_"))
 async def handle_order_action(callback: types.CallbackQuery, session: AsyncSession):
-    action, order_id = callback.data.split('_')[1], int(callback.data.split('_')[-1])
-    user_id = callback.from_user.id
+    # Разбираем callback_data в формате "order_<id>_<action>"
+    parts = callback.data.split('_')
 
+    if len(parts) < 3:
+        await callback.answer("Некорректный формат данных.")
+        return
+
+    order_id = parts[1]
+    action = parts[2]
+
+    try:
+        order_id = int(order_id)  # Преобразуем идентификатор заказа в число
+    except ValueError:
+        await callback.answer("Некорректный идентификатор заказа.")
+        return
+
+    # Проверяем действие и обновляем статус заказа
     status_map = {
         "cancel": "Отменен",
         "ready": "Готов к получению",
-        "issued": "Выдан"
+        "delivered": "Выдан"
     }
-    if action in status_map:
-        await update_order_status(session, order_id, status_map[action])
-        await callback.answer(f"Статус заказа обновлен: {status_map[action]}")
 
-        # Уведомляем пользователя
-        user_message = {
-            "cancel": f"Ваш заказ #{order_id} отменен.",
-            "ready": f"Ваш заказ #{order_id} готов к получению!",
-            "issued": f"Ваш заказ #{order_id} выдан."
-        }
-        await bot.send_message(user_id, user_message[action])
+    if action in status_map:
+        new_status = status_map[action]
+        await update_order_status(session, order_id, new_status)
+        await callback.answer(f"Статус заказа обновлен на '{new_status}'.")
+    else:
+        await callback.answer("Неизвестное действие.")
 
 
 @admin_router.message(Command("orders"))

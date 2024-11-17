@@ -402,3 +402,26 @@ async def display_orders_to_user(session: AsyncSession, user_id: int):
 
 
 
+async def get_all_orders(session: AsyncSession):
+    from database.models import Order
+    query = select(Order).order_by(Order.created.desc())
+    result = await session.execute(query)
+    orders = result.scalars().all()
+
+    if not orders:
+        return "Нет заказов.", None
+
+    orders_text = "Все заказы:\n"
+    for order in orders:
+        orders_text += f"Заказ №{order.order_number} — Статус: {order.status}, Общая стоимость: {order.total_cost} ₽\n"
+
+    keyboard = InlineKeyboardMarkup().add(InlineKeyboardButton("Обновить", callback_data="refresh_orders"))
+    return orders_text, keyboard
+
+
+
+async def get_user_by_id(session: AsyncSession, user_id: int):
+    from database.models import User  # Предполагается, что модель User существует
+    query = select(User).where(User.user_id == user_id)
+    result = await session.execute(query)
+    return result.scalars().first()
