@@ -8,6 +8,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
 from database.orm_query import (
+    get_order_items,
     get_user_by_id,
     update_order_status,
     get_orders,
@@ -395,55 +396,97 @@ async def admin_search_products(message: types.Message, session: AsyncSession, s
 
 # Обработчик кнопки "Заказы"
 @admin_router.message(F.text == 'Заказы')
-async def show_orders(message: types.Message, session: AsyncSession):
-    # Получаем список всех заказов
-    orders = await get_orders(session)
+async def show_orders_menu(message: types.Message):
+    buttons = [
+        InlineKeyboardButton(text="Все заказы", callback_data="view_all_orders"),
+        InlineKeyboardButton(text="Выданные", callback_data="view_delivered_orders"),
+        InlineKeyboardButton(text="В обработке", callback_data="view_processing_orders"),
+        InlineKeyboardButton(text="Готовы к получению", callback_data="view_ready_orders"),
+    ]
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [buttons[0], buttons[1]],  # В два столбика
+        [buttons[2], buttons[3]],  # В два столбика
+        [InlineKeyboardButton(text="Поиск", callback_data="search_orders")]
+    ])
+    await message.answer("Выберите действие для просмотра заказов:", reply_markup=keyboard)
+
+@admin_router.callback_query(F.data.startswith("view_"))
+async def filter_orders_by_status(callback: types.CallbackQuery, session: AsyncSession):
+    status_map = {
+        "all_orders": None,
+        "processing_orders": "В обработке",
+        "ready_orders": "Готов",
+        "delivered_orders": "Выдан"
+    }
+    status_key = callback.data.split("_")[1]
+    status = status_map.get(status_key)
+
+    if status:
+        orders = await get_orders(session, status=status)
+    else:
+        orders = await get_orders(session)
 
     if not orders:
-        await message.answer("Нет заказов.")
+        await callback.message.answer(f"Нет заказов со статусом '{status or 'все'}'.")
         return
 
-    # Отображаем информацию о заказах
+    orders = sorted(orders, key=lambda x: x.created, reverse=True)
+
     for order in orders:
-        # Получаем данные о пользователе (предполагается, что метод get_user_by_id существует)
         user = await get_user_by_id(session, order.user_id)
         user_info = f"Пользователь: {user.first_name} {user.last_name} (ID: {user.user_id})" if user else "Пользователь: Неизвестен"
+        order_items = await get_order_items(session, order.id)
+        items_info = "\n".join([
+            f"{item.product.name} — {item.product.sku}\n"
+            f"Количество: {item.stock}, Цена: {item.price} ₽"
+            for item in order_items
+        ])
+        total_sum = sum(item.stock * item.price for item in order_items)
+        created_time = order.created.strftime("%d.%m.%Y %H:%M")
 
-        status_text = f"Статус: {order.status}"
-
-        # Кнопки для изменения статуса
         buttons = [
             InlineKeyboardButton(text="Отмена", callback_data=f"order_{order.id}_cancel"),
             InlineKeyboardButton(text="Готов", callback_data=f"order_{order.id}_ready"),
             InlineKeyboardButton(text="Выдан", callback_data=f"order_{order.id}_delivered")
         ]
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[button] for button in buttons])
 
-        # Создаем клавиатуру только если есть кнопки
-        if buttons:
-            keyboard = InlineKeyboardMarkup(inline_keyboard=[[button] for button in buttons])
-            await message.answer(
-                f"Заказ № {order.order_number}\n"
-                f"{user_info}\n"
-                f"{status_text}",
-                reply_markup=keyboard
-            )
-        else:
-            await message.answer(
-                f"Заказ № {order.order_number}\n"
-                f"{user_info}\n"
-                f"{status_text}\n(Нет доступных действий)"
-            )
+        await callback.message.answer(
+            f"Заказ № {order.order_number}\n"
+            f"{user_info}\n"
+            f"Дата и время заказа: {created_time}\n"
+            f"Статус: {order.status}\n"
+            f"Товары:\n{items_info}\n"
+            f"Общая сумма заказа: {total_sum:.2f} ₽",
+            reply_markup=keyboard
+        )
 
 
-# Добавьте команду или callback для обработки отображения всех заказов
-@admin_router.message(Command("orders"))
-async def show_all_orders(message: types.Message, session: AsyncSession):
-    """Показ всех заказов для администратора."""
-    orders_text, keyboard = await get_all_orders(session)
-    if not orders_text:
-        await message.answer("Нет доступных заказов.")
+
+
+@admin_router.callback_query(F.data == "search_orders")
+async def search_orders_prompt(callback: types.CallbackQuery, state: FSMContext):
+    await callback.message.answer("Введите номер заказа или имя пользователя для поиска:")
+    await state.set_state("search_order")
+
+@admin_router.message(StateFilter("search_order"), F.text)
+async def handle_search_order(message: types.Message, session: AsyncSession, state: FSMContext):
+    search_query = message.text.strip()
+    orders = await get_orders(session)
+
+    matching_orders = [
+        order for order in orders
+        if search_query in str(order.order_number) or (order.user and search_query in f"{order.user.first_name} {order.user.last_name}")
+    ]
+
+    if not matching_orders:
+        await message.answer("Заказы не найдены.")
     else:
-        await message.answer(orders_text, reply_markup=keyboard)
+        await display_orders_to_user(session, message, matching_orders)
+
+    await state.clear()
+
+
 
 
 
@@ -580,3 +623,24 @@ async def handle_excel_upload(message: types.Message):
     # Загрузка файла на сервер
     await file.download(destination=f"/path/to/upload/{message.document.file_name}")
     await message.answer("Файл Excel успешно загружен и обработан.")
+
+
+@admin_router.callback_query(F.data == "view_all_orders")
+async def view_all_orders(callback: types.CallbackQuery, session: AsyncSession):
+    orders = await get_orders(session)
+    await display_orders(callback, orders)
+
+@admin_router.callback_query(F.data == "view_delivered_orders")
+async def view_delivered_orders(callback: types.CallbackQuery, session: AsyncSession):
+    orders = await get_orders(session, status="Выдан")
+    await display_orders(callback, orders)
+
+@admin_router.callback_query(F.data == "view_processing_orders")
+async def view_processing_orders(callback: types.CallbackQuery, session: AsyncSession):
+    orders = await get_orders(session, status="В обработке")
+    await display_orders(callback, orders)
+
+@admin_router.callback_query(F.data == "view_ready_orders")
+async def view_ready_orders(callback: types.CallbackQuery, session: AsyncSession):
+    orders = await get_orders(session, status="Готов к получению")
+    await display_orders(callback, orders)

@@ -185,15 +185,17 @@ async def user_orders(session, user_id):
 
     orders_text = "Ваши заказы:\n"
     for order in orders:
-        orders_text += f"Номер: {order.order_number}\nТовары:\n"
+        created_time = order.created.strftime("%d.%m.%Y %H:%M")  # Форматируем дату и время
+        orders_text += (
+            f"Номер: {order.order_number}\n"
+            f"Дата и время заказа: {created_time}\n"  # Добавлено отображение даты и времени
+            f"Товары:\n"
+        )
         for item in order.items:
             orders_text += f"{item.product.name} - {item.stock} шт.\n"
-        orders_text += f"Сумма: {sum([item.stock * item.price for item in order.items])}₽\nСтатус: {order.status}\n\n"
+        orders_text += f"Сумма: {sum([item.stock * item.price for item in order.items]):.2f} ₽\nСтатус: {order.status}\n\n"
 
     return orders_text, InlineKeyboardMarkup().add(InlineKeyboardButton("На главную 🏠", callback_data="main_menu"))
-
-
-
 
 
 

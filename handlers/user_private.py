@@ -240,21 +240,24 @@ async def create_order(message: types.Message, session: AsyncSession, user_id: i
 
 @user_private_router.message(F.text == "Заказы 📝")
 async def show_user_orders(message: types.Message, session: AsyncSession, user_id: int):
-    """Показать все заказы пользователя в чате бота."""
     orders = await get_user_orders(session, user_id)
     if not orders:
         await message.answer("У вас нет заказов.")
         return
 
-    message = "Ваши заказы:\n"
     for order in orders:
-        message += f"Заказ №{order.order_number}, Статус: {order.status}, Общая стоимость: {order.total_cost} ₽\n"
+        created_time = order.created.strftime("%d.%m.%Y %H:%M")  # Форматируем дату и время
+        order_text = (
+            f"Заказ №{order.order_number}\n"
+            f"Дата и время заказа: {created_time}\n"  # Добавлено отображение даты и времени
+            f"Статус: {order.status}\n"
+            f"Общая стоимость: {order.total_cost:.2f} ₽\n"
+        )
         for item in order.items:
             product = item.product
-            message += f"  - {product.name} (Количество: {item.stock}, Цена: {item.price} ₽)\n"
-        message += "\n"
-
-    await message.answer(message)
+            order_text += f"  - {product.name} (Количество: {item.stock}, Цена: {item.price:.2f} ₽)\n"
+        order_text += "\n"
+        await message.answer(order_text)
 
 
 
@@ -296,7 +299,41 @@ async def handle_user_orders(message: types.Message, session: AsyncSession, user
         await message.answer("У вас нет заказов.")
         return
 
-    # Для каждого заказа отправляем информацию о его статусе
     for order in orders:
-        await message.answer(f"Заказ #{order.id}\nСтатус: {order.status}")
+        created_time = order.created.strftime("%d.%m.%Y %H:%M")  # Форматируем дату и время
+        order_text = (
+            f"Заказ №{order.order_number}\n"
+            f"Дата и время заказа: {created_time}\n"  # Добавлено отображение даты и времени
+            f"Статус: {order.status}\n"
+            f"Общая стоимость: {order.total_cost:.2f} ₽\n"
+        )
+        for item in order.items:
+            product = item.product
+            order_text += f"  - {product.name} (Количество: {item.stock}, Цена: {item.price:.2f} ₽)\n"
+        order_text += "\n"
+        await message.answer(order_text)
+
+
+
+@user_private_router.callback_query(F.data.startswith("delete_order_"))
+async def handle_delete_order(callback: types.CallbackQuery, session: AsyncSession):
+    # Извлекаем ID заказа из callback_data
+    order_id = int(callback.data.split("_")[-1])
+
+    # Проверяем, существует ли заказ и принадлежит ли он пользователю
+    order = await session.get(Order, order_id)
+    if not order or order.user_id != callback.from_user.id:
+        await callback.answer("Ошибка: Заказ не найден или недоступен для удаления.", show_alert=True)
+        return
+
+    # Удаляем заказ и коммитим изменения
+    try:
+        await session.delete(order)
+        await session.commit()
+        await callback.answer("Заказ успешно удален.")
+        await callback.message.delete()  # Удаляем сообщение с заказом после удаления заказа
+    except Exception as e:
+        await session.rollback()
+        logging.error(f"Ошибка при удалении заказа {order_id}: {e}")
+        await callback.answer("Произошла ошибка при удалении заказа. Попробуйте еще раз.", show_alert=True)
 

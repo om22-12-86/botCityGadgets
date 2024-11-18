@@ -1,4 +1,5 @@
 from sqlalchemy import or_
+from aiogram import types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -233,10 +234,13 @@ async def orm_get_user_orders(session: AsyncSession, user_id: int):
 
 
 # Функция для получения всех заказов
-async def get_orders(session: AsyncSession):
+async def get_orders(session: AsyncSession, status: str = None):
     query = select(Order).options(selectinload(Order.user))
+    if status:
+        query = query.where(Order.status == status)
     result = await session.execute(query)
     return result.scalars().all()
+
 
 
 
@@ -367,7 +371,13 @@ async def get_user_orders(session: AsyncSession, user_id: int):
     # Формируем текст с заказами
     orders_text = "Ваши заказы:\n"
     for order in orders:
-        orders_text += f"Заказ №{order.order_number}\nСтатус: {order.status}\nОбщая стоимость: {order.total_cost} ₽\n"
+        created_time = order.created.strftime("%d.%m.%Y %H:%M")  # Форматируем дату и время
+        orders_text += (
+            f"Заказ №{order.order_number}\n"
+            f"Дата и время заказа: {created_time}\n"  # Добавлено отображение даты и времени
+            f"Статус: {order.status}\n"
+            f"Общая стоимость: {order.total_cost} ₽\n"
+        )
         for item in order.items:
             product = item.product
             orders_text += f"{product.name} (Количество: {item.stock}, Цена: {item.price} ₽)\n"
@@ -402,6 +412,8 @@ async def display_orders_to_user(session: AsyncSession, user_id: int):
 
 
 
+
+
 async def get_all_orders(session: AsyncSession):
     from database.models import Order
     query = select(Order).order_by(Order.created.desc())
@@ -425,3 +437,47 @@ async def get_user_by_id(session: AsyncSession, user_id: int):
     query = select(User).where(User.user_id == user_id)
     result = await session.execute(query)
     return result.scalars().first()
+
+
+async def get_order_items(session: AsyncSession, order_id: int):
+    from database.models import OrderItem, Product  # Предполагается, что есть модель OrderItem и Product
+    query = (
+        select(OrderItem)
+        .options(selectinload(OrderItem.product))  # Используйте selectinload для загрузки связанных данных
+        .where(OrderItem.order_id == order_id)
+    )
+    result = await session.execute(query)
+    return result.scalars().all()
+
+
+
+async def display_orders(callback: types.CallbackQuery, orders):
+    if not orders:
+        await callback.message.answer("Нет заказов с выбранным статусом.")
+        return
+
+    for order in orders:
+        user_info = f"Пользователь: {order.user.first_name} {order.user.last_name} (ID: {order.user.user_id})" if order.user else "Пользователь: Неизвестен"
+        order_items = await get_order_items(callback.bot.get('db_session'), order.id)
+        items_info = "\n".join([
+            f"{item.product.name} — {item.product.sku}\n"
+            f"Количество: {item.stock}, Цена: {item.price} ₽"
+            for item in order_items
+        ])
+        total_sum = sum(item.stock * item.price for item in order_items)
+
+        buttons = [
+            InlineKeyboardButton(text="Отмена", callback_data=f"order_{order.id}_cancel"),
+            InlineKeyboardButton(text="Готов", callback_data=f"order_{order.id}_ready"),
+            InlineKeyboardButton(text="Выдан", callback_data=f"order_{order.id}_delivered")
+        ]
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[[button] for button in buttons])
+
+        await callback.message.answer(
+            f"Заказ № {order.order_number}\n"
+            f"{user_info}\n"
+            f"Статус: {order.status}\n"
+            f"Товары:\n{items_info}\n"
+            f"Общая сумма заказа: {total_sum:.2f} ₽",
+            reply_markup=keyboard
+        )
