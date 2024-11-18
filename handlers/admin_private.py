@@ -6,9 +6,13 @@ from utils.paginator import Paginator
 from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.types import CallbackQuery
+from sqlalchemy.future import select
+from database.engine import SessionLocal
+from database.models import Order, User
 
 
 from database.orm_query import (
+    display_orders_to_user,
     delete_order,
     get_order_items,
     get_user_by_id,
@@ -431,12 +435,13 @@ async def filter_orders_by_status(callback: types.CallbackQuery, session: AsyncS
     """
     Фильтрация заказов по выбранному статусу.
     """
-    # Словарь для маппинга статусов
+    # Маппинг статусов
     status_map = {
         "all_orders": None,  # Все заказы
         "delivered_orders": "Выдан",  # Заказы с статусом "Выдан"
         "processing_orders": "В обработке",  # Заказы в процессе
-        "cancelled_orders": "Отменен"  # Заказы с отмененным статусом
+        "cancelled_orders": "Отменен",  # Заказы с отмененным статусом
+        "ready_orders": "Готов к получению"  # Заказы готовые к получению
     }
 
     # Получаем статус из callback_data
@@ -444,7 +449,7 @@ async def filter_orders_by_status(callback: types.CallbackQuery, session: AsyncS
     status = status_map.get(status_key)  # Если статус найден, применяем его
 
     # Получаем список заказов с учетом фильтрации
-    orders = await get_orders(session, status=status) if status else await get_orders(session)
+    orders = await get_orders_by_status(session, status) if status else await get_orders(session)
 
     if not orders:
         await callback.message.answer(f"Нет заказов со статусом '{status or 'все'}'.")
@@ -453,7 +458,7 @@ async def filter_orders_by_status(callback: types.CallbackQuery, session: AsyncS
     # Сортируем заказы по дате создания (от новых к старым)
     orders = sorted(orders, key=lambda x: x.created, reverse=True)
 
-    # Отображаем информацию о каждом заказе
+    # Отправка заказов
     for order in orders:
         user = await get_user_by_id(session, order.user_id)
         user_info = f"Пользователь: {user.first_name} {user.last_name} (ID: {user.user_id})" if user else "Пользователь: Неизвестен"
@@ -496,14 +501,18 @@ async def filter_orders_by_status(callback: types.CallbackQuery, session: AsyncS
 
 
 
+
+
 # Обработчик для поиска заказов
 @admin_router.callback_query(F.data == "search_orders")
 async def search_orders_prompt(callback: types.CallbackQuery, state: FSMContext):
     """
     Запрос пользователя на ввод номера заказа или имени пользователя для поиска.
     """
-    await callback.message.answer("Введите номер заказа или имя пользователя для поиска:")
+    await callback.message.answer("Введите номер заказа:")
     await state.set_state("search_order")
+
+
 
 @admin_router.message(StateFilter("search_order"), F.text)
 async def handle_search_order(message: types.Message, session: AsyncSession, state: FSMContext):
@@ -511,20 +520,32 @@ async def handle_search_order(message: types.Message, session: AsyncSession, sta
     Обработка запроса на поиск заказов.
     """
     search_query = message.text.strip()
-    orders = await get_orders(session)
 
-    # Ищем заказы по номеру или имени пользователя
-    matching_orders = [
-        order for order in orders
-        if search_query in str(order.order_number) or (order.user and search_query in f"{order.user.first_name} {order.user.last_name}")
-    ]
+    # Используем SessionLocal для создания сессии
+    async with SessionLocal() as session:
+        # Ищем заказы по номеру
+        result = await session.execute(select(Order).where(Order.order_number.like(f"%{search_query}%")))
 
-    if not matching_orders:
-        await message.answer("Заказы не найдены.")
-    else:
-        await display_orders_to_user(session, message, matching_orders)
+        # Получаем все заказы
+        orders = result.scalars().all()
+
+        # Дополнительно ищем заказы по имени пользователя (предполагается, что есть связь с моделью User)
+        matching_orders = []
+        for order in orders:
+            # Ищем по номеру заказа или по имени пользователя
+            if search_query in str(order.order_number):
+                matching_orders.append(order)
+            elif order.user and search_query.lower() in f"{order.user.first_name} {order.user.last_name}".lower():
+                matching_orders.append(order)
+
+        # Проверяем, есть ли совпадения
+        if not matching_orders:
+            await message.answer("Заказы не найдены.")
+        else:
+            await display_orders_to_user(session, message, matching_orders)
 
     await state.clear()
+
 
 
 

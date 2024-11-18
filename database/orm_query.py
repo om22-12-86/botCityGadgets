@@ -414,50 +414,52 @@ async def get_user_orders(session: AsyncSession, user_id: int):
     return orders_text, keyboard
 
 
-# Функция для отображения заказов с кнопками
-async def display_orders_to_user(session: AsyncSession, user_id: int, page: int = 1, status: str = None):
-    # Ограничение на количество заказов на странице
-    limit = 10
-    offset = (page - 1) * limit
+# Функция для отображения заказов пользователю (предполагается, что она уже есть)
+async def display_orders_to_user(session, message, orders):
+    """
+    Отображает заказы пользователю с возможностью изменять статус и удалять заказы.
+    """
+    for order in orders:
+        # Получаем данные о пользователе
+        user = await get_user_by_id(session, order.user_id)
+        user_info = f"Пользователь: {user.first_name} {user.last_name} (ID: {user.user_id})" if user else "Пользователь: Неизвестен"
 
-    query = select(Order).filter(Order.user_id == user_id)
+        # Получаем товары заказа
+        order_items = await get_order_items(session, order.id)
+        items_info = "\n".join(
+            [f"{item.product.name} — {item.product.sku}\nКоличество: {item.stock}, Цена: {item.price} ₽" for item in
+             order_items])
 
-    # Добавление фильтрации по статусу, если указан статус
-    if status:
-        query = query.filter(Order.status == status)
+        # Рассчитываем общую сумму заказа
+        total_sum = sum(item.stock * item.price for item in order_items)
 
-    query = query.order_by(Order.created.desc()).limit(limit).offset(offset)
+        # Время создания заказа
+        created_time = order.created.strftime("%d.%m.%Y %H:%M")
 
-    result = await session.execute(query)
-    orders = result.scalars().all()
+        # Формируем сообщение для отправки
+        order_details = (
+            f"Заказ № {order.order_number}\n"
+            f"{user_info}\n"
+            f"Дата и время заказа: {created_time}\n"
+            f"Статус: {order.status}\n"
+            f"Товары:\n{items_info}\n"
+            f"Общая сумма заказа: {total_sum:.2f} ₽"
+        )
 
-    if not orders:
-        return "У вас нет заказов.", None
+        # Создаем кнопки для управления заказом
+        buttons = [
+            InlineKeyboardButton(text="Отмена", callback_data=f"order_{order.id}_cancel"),
+            InlineKeyboardButton(text="Готов", callback_data=f"order_{order.id}_ready"),
+            InlineKeyboardButton(text="Выдан", callback_data=f"order_{order.id}_delivered"),
+            InlineKeyboardButton(text="Удалить", callback_data=f"order_{order.id}_delete")  # Кнопка для удаления
+        ]
 
-    order_texts = [
-        f"Заказ #{order.order_number}, статус: {order.status}, сумма: {order.total_cost} ₽, создан: {order.created}" for
-        order in orders]
+        # Создаем клавиатуру с кнопками
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[buttons], row_width=2)  # Правильная инициализация
 
-    # Проверка, нужно ли отображать кнопку "Следующие"
-    next_page = page + 1
-    query_next = select(Order).filter(Order.user_id == user_id)
+        # Отправляем сообщение с информацией о заказе и кнопками
+        await message.answer(order_details, reply_markup=keyboard)
 
-    if status:
-        query_next = query_next.filter(Order.status == status)
-
-    query_next = query_next.order_by(Order.created.desc()).limit(limit).offset(next_page * limit)
-
-    result_next = await session.execute(query_next)
-    next_orders = result_next.scalars().all()
-
-    # Если есть следующие заказы, показываем кнопку
-    if next_orders:
-        keyboard = InlineKeyboardMarkup().add(
-            InlineKeyboardButton("Следующие заказы", callback_data=f"next_orders_{next_page}"))
-    else:
-        keyboard = None
-
-    return "\n\n".join(order_texts), keyboard
 
 
 
