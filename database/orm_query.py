@@ -1,6 +1,7 @@
 from sqlalchemy import or_
 from aiogram import types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import CallbackQuery
 from sqlalchemy import select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload, selectinload
@@ -235,11 +236,26 @@ async def orm_get_user_orders(session: AsyncSession, user_id: int):
 
 # Функция для получения всех заказов
 async def get_orders(session: AsyncSession, status: str = None):
-    query = select(Order).options(selectinload(Order.user))
+    """
+    Получение всех заказов, с фильтрацией по статусу (если указано).
+    """
+    query = select(Order)
     if status:
-        query = query.where(Order.status == status)
+        query = query.filter(Order.status == status)
     result = await session.execute(query)
     return result.scalars().all()
+
+
+
+# Функция для получения заказов по статусу
+async def get_orders_by_status(session: AsyncSession, status: str):
+    """
+    Получение заказов по статусу.
+    """
+    query = select(Order).filter(Order.status == status)
+    result = await session.execute(query)
+    return result.scalars().all()
+
 
 
 
@@ -347,19 +363,26 @@ async def update_order(session: AsyncSession, order_id: int, new_status: str, to
     await session.execute(update_query)
     await session.commit()
 
+# Функция для обновления статуса заказа
 async def update_order_status(session: AsyncSession, order_id: int, status: str):
-    """Обновление статуса заказа."""
-    query = update(Order).where(Order.id == order_id).values(status=status, updated=datetime.now())
-    await session.execute(query)
-    await session.commit()
-    return status
+    """
+    Обновление статуса заказа в базе данных.
+    """
+    try:
+        query = update(Order).where(Order.id == order_id).values(status=status, updated=datetime.now())
+        result = await session.execute(query)
+        await session.commit()
+        return status
+    except Exception as e:
+        logging.error(f"Ошибка обновления статуса заказа #{order_id}: {e}")
+        return "Ошибка при обновлении статуса."
 
 
 # Если заказов нет, выводим сообщение, если есть — список заказов
 
+# Функция для получения заказов пользователя
 async def get_user_orders(session: AsyncSession, user_id: int):
     """Функция для получения заказов пользователя"""
-    # Выполняем запрос к базе данных для получения заказов пользователя
     result = await session.execute(
         select(Order).filter_by(user_id=user_id).options(selectinload(Order.items).selectinload(OrderItem.product))
     )
@@ -371,12 +394,12 @@ async def get_user_orders(session: AsyncSession, user_id: int):
     # Формируем текст с заказами
     orders_text = "Ваши заказы:\n"
     for order in orders:
-        created_time = order.created.strftime("%d.%m.%Y %H:%M")  # Форматируем дату и время
+        created_time = order.created.strftime("%d.%m.%Y %H:%M")
         orders_text += (
             f"Заказ №{order.order_number}\n"
-            f"Дата и время заказа: {created_time}\n"  # Добавлено отображение даты и времени
+            f"Дата и время заказа: {created_time}\n"
             f"Статус: {order.status}\n"
-            f"Общая стоимость: {order.total_cost} ₽\n"
+            f"Общая стоимость: {order.total_cost:.2f} ₽\n"
         )
         for item in order.items:
             product = item.product
@@ -391,26 +414,50 @@ async def get_user_orders(session: AsyncSession, user_id: int):
     return orders_text, keyboard
 
 
+# Функция для отображения заказов с кнопками
+async def display_orders_to_user(session: AsyncSession, user_id: int, page: int = 1, status: str = None):
+    # Ограничение на количество заказов на странице
+    limit = 10
+    offset = (page - 1) * limit
 
+    query = select(Order).filter(Order.user_id == user_id)
 
-async def display_orders_to_user(session: AsyncSession, user_id: int):
-    query = select(Order).filter(Order.user_id == user_id).order_by(Order.created.desc())
+    # Добавление фильтрации по статусу, если указан статус
+    if status:
+        query = query.filter(Order.status == status)
+
+    query = query.order_by(Order.created.desc()).limit(limit).offset(offset)
+
     result = await session.execute(query)
     orders = result.scalars().all()
 
     if not orders:
         return "У вас нет заказов.", None
 
-    order_texts = []
-    for order in orders:
-        order_texts.append(
-            f"Заказ #{order.order_number}, статус: {order.status}, сумма: {order.total_cost} ₽, создан: {order.created}"
-        )
+    order_texts = [
+        f"Заказ #{order.order_number}, статус: {order.status}, сумма: {order.total_cost} ₽, создан: {order.created}" for
+        order in orders]
 
-    return "\n\n".join(order_texts), None
+    # Проверка, нужно ли отображать кнопку "Следующие"
+    next_page = page + 1
+    query_next = select(Order).filter(Order.user_id == user_id)
 
+    if status:
+        query_next = query_next.filter(Order.status == status)
 
+    query_next = query_next.order_by(Order.created.desc()).limit(limit).offset(next_page * limit)
 
+    result_next = await session.execute(query_next)
+    next_orders = result_next.scalars().all()
+
+    # Если есть следующие заказы, показываем кнопку
+    if next_orders:
+        keyboard = InlineKeyboardMarkup().add(
+            InlineKeyboardButton("Следующие заказы", callback_data=f"next_orders_{next_page}"))
+    else:
+        keyboard = None
+
+    return "\n\n".join(order_texts), keyboard
 
 
 
@@ -450,30 +497,31 @@ async def get_order_items(session: AsyncSession, order_id: int):
     return result.scalars().all()
 
 
-
-async def display_orders(callback: types.CallbackQuery, orders):
+# Функция для отображения заказов
+async def display_orders(message, orders):
+    """
+    Отображение заказов с их деталями.
+    """
     if not orders:
-        await callback.message.answer("Нет заказов с выбранным статусом.")
+        await message.answer("Нет заказов с выбранным статусом.")
         return
 
     for order in orders:
         user_info = f"Пользователь: {order.user.first_name} {order.user.last_name} (ID: {order.user.user_id})" if order.user else "Пользователь: Неизвестен"
-        order_items = await get_order_items(callback.bot.get('db_session'), order.id)
-        items_info = "\n".join([
-            f"{item.product.name} — {item.product.sku}\n"
-            f"Количество: {item.stock}, Цена: {item.price} ₽"
-            for item in order_items
-        ])
+        order_items = await get_order_items(message.bot.get('db_session'), order.id)
+        items_info = "\n".join([f"{item.product.name} — {item.product.sku}\nКоличество: {item.stock}, Цена: {item.price} ₽" for item in order_items])
         total_sum = sum(item.stock * item.price for item in order_items)
 
+        # Кнопки для изменения статуса заказа и удаления
         buttons = [
             InlineKeyboardButton(text="Отмена", callback_data=f"order_{order.id}_cancel"),
             InlineKeyboardButton(text="Готов", callback_data=f"order_{order.id}_ready"),
-            InlineKeyboardButton(text="Выдан", callback_data=f"order_{order.id}_delivered")
+            InlineKeyboardButton(text="Выдан", callback_data=f"order_{order.id}_delivered"),
+            InlineKeyboardButton(text="Удалить", callback_data=f"order_{order.id}_delete")  # Кнопка для удаления
         ]
         keyboard = InlineKeyboardMarkup(inline_keyboard=[[button] for button in buttons])
 
-        await callback.message.answer(
+        await message.answer(
             f"Заказ № {order.order_number}\n"
             f"{user_info}\n"
             f"Статус: {order.status}\n"
@@ -481,3 +529,55 @@ async def display_orders(callback: types.CallbackQuery, orders):
             f"Общая сумма заказа: {total_sum:.2f} ₽",
             reply_markup=keyboard
         )
+
+
+# Функция для удаления заказа
+# Обработчик для удаления заказа
+async def delete_order(session: AsyncSession, callback_query: CallbackQuery):
+    callback_data = callback_query.data
+    if not callback_data.startswith("delete_order_"):
+        return
+
+    # Извлекаем id заказа
+    order_id = int(callback_data.split("_")[-1])
+
+    # Получаем заказ
+    query = select(Order).where(Order.id == order_id)
+    result = await session.execute(query)
+    order = result.scalar_one_or_none()
+
+    if not order:
+        await callback_query.answer("Этот заказ не найден.")
+        return
+
+    # Удаляем товары из заказа
+    await session.execute(select(OrderItem).filter(OrderItem.order_id == order_id).delete())
+
+    # Удаляем сам заказ
+    await session.execute(select(Order).filter(Order.id == order_id).delete())
+    await session.commit()
+
+    # Подтверждаем удаление
+    await callback_query.answer("Заказ успешно удален.")
+
+    # Отправляем обновленное сообщение
+    await send_user_orders(session, order.user_id, callback_query.message)
+
+
+
+# Получаем все заказы пользователя и отправляем их с кнопками
+async def send_user_orders(session: AsyncSession, user_id: int, message: types.Message):
+    # Получаем все заказы пользователя
+    query = select(Order).where(Order.user_id == user_id)
+    result = await session.execute(query)
+    orders = result.scalars().all()
+
+    if not orders:
+        await message.answer("У вас нет заказов.")
+        return
+
+    # Для каждого заказа создаем сообщение с кнопками
+    for order in orders:
+        order_info = f"Заказ №{order.order_number}\nСтатус: {order.status}\nОбщая стоимость: {order.total_cost} руб."
+        keyboard = await generate_order_buttons(order.id)
+        await message.answer(order_info, reply_markup=keyboard)

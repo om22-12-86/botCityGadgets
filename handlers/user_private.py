@@ -210,9 +210,10 @@ async def buy_product(callback: types.CallbackQuery, session: AsyncSession):
         await callback.answer("Не удалось добавить товар. Возможно, товар закончился или пользователь не добавлен.")
 
 
-@user_private_router.callback_query(F.data == 'main_menu')
+# Обработчик для кнопки "На главную 🏠"
+@user_private_router.callback_query(F.data == "main_menu")
 async def go_to_main_menu(callback: types.CallbackQuery, session: AsyncSession):
-    # Здесь функция для возврата к главному меню
+    # Возвращаем пользователя в главное меню
     media, reply_markup = await get_menu_content(session, level=0, menu_name='main')
     await callback.message.edit_media(media=media, reply_markup=reply_markup)
     await callback.answer("Вы вернулись в главное меню.")
@@ -237,27 +238,47 @@ async def create_order(message: types.Message, session: AsyncSession, user_id: i
     await orm_clear_user_cart(session, user_id)
 
 
-
 @user_private_router.message(F.text == "Заказы 📝")
 async def show_user_orders(message: types.Message, session: AsyncSession, user_id: int):
-    orders = await get_user_orders(session, user_id)
+    orders = await get_user_orders(session, user_id)  # Получаем все заказы пользователя
     if not orders:
         await message.answer("У вас нет заказов.")
         return
 
+    # Перебираем все заказы
     for order in orders:
         created_time = order.created.strftime("%d.%m.%Y %H:%M")  # Форматируем дату и время
         order_text = (
             f"Заказ №{order.order_number}\n"
-            f"Дата и время заказа: {created_time}\n"  # Добавлено отображение даты и времени
+            f"Дата и время заказа: {created_time}\n"  # Дата и время заказа
             f"Статус: {order.status}\n"
             f"Общая стоимость: {order.total_cost:.2f} ₽\n"
         )
+
+        # Перечисляем товары в заказе
         for item in order.items:
             product = item.product
             order_text += f"  - {product.name} (Количество: {item.stock}, Цена: {item.price:.2f} ₽)\n"
         order_text += "\n"
-        await message.answer(order_text)
+
+        # Кнопки для взаимодействия с заказом
+        buttons = [
+            InlineKeyboardButton(text="На главную 🏠", callback_data="main_menu"),
+            InlineKeyboardButton(text="Удалить", callback_data=f"delete_order_{order.id}")
+        ]
+
+        # Создаем клавиатуру с кнопками
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [buttons[0], buttons[1]],  # Два столбца кнопок
+            ],
+            resize_keyboard=True,  # Кнопки будут адаптироваться по размеру
+            one_time_keyboard=True  # После нажатия скрываются
+        )
+
+        # Отправляем сообщение с заказом и клавиатурой
+        await message.answer(order_text, reply_markup=keyboard)
+
 
 
 
@@ -315,6 +336,7 @@ async def handle_user_orders(message: types.Message, session: AsyncSession, user
 
 
 
+# Обработчик для кнопки "Удалить"
 @user_private_router.callback_query(F.data.startswith("delete_order_"))
 async def handle_delete_order(callback: types.CallbackQuery, session: AsyncSession):
     # Извлекаем ID заказа из callback_data
@@ -331,9 +353,8 @@ async def handle_delete_order(callback: types.CallbackQuery, session: AsyncSessi
         await session.delete(order)
         await session.commit()
         await callback.answer("Заказ успешно удален.")
-        await callback.message.delete()  # Удаляем сообщение с заказом после удаления заказа
+        await callback.message.delete()  # Удаляем сообщение с заказом после удаления
     except Exception as e:
         await session.rollback()
         logging.error(f"Ошибка при удалении заказа {order_id}: {e}")
         await callback.answer("Произошла ошибка при удалении заказа. Попробуйте еще раз.", show_alert=True)
-

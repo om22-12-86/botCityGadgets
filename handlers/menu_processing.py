@@ -178,24 +178,43 @@ async def get_banner(session: AsyncSession, banner_name: str):
 
 
 
-async def user_orders(session, user_id):
+async def user_orders(session, user_id, message):
+    # Получаем заказы пользователя
     orders = await get_user_orders(session, user_id)
     if not orders:
-        return "У вас пока нет заказов.", None
+        await message.answer("У вас пока нет заказов.")
+        return
 
     orders_text = "Ваши заказы:\n"
     for order in orders:
         created_time = order.created.strftime("%d.%m.%Y %H:%M")  # Форматируем дату и время
         orders_text += (
             f"Номер: {order.order_number}\n"
-            f"Дата и время заказа: {created_time}\n"  # Добавлено отображение даты и времени
+            f"Дата и время заказа: {created_time}\n"
             f"Товары:\n"
         )
         for item in order.items:
             orders_text += f"{item.product.name} - {item.stock} шт.\n"
         orders_text += f"Сумма: {sum([item.stock * item.price for item in order.items]):.2f} ₽\nСтатус: {order.status}\n\n"
 
-    return orders_text, InlineKeyboardMarkup().add(InlineKeyboardButton("На главную 🏠", callback_data="main_menu"))
+        # Кнопки для взаимодействия с заказом
+        buttons = [
+            InlineKeyboardButton(text="На главную 🏠", callback_data="main_menu"),
+            InlineKeyboardButton(text="Удалить", callback_data=f"delete_order_{order.id}")
+        ]
+
+        # Создаем клавиатуру с кнопками под каждым заказом
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [buttons[0], buttons[1]],  # Два столбика
+            ],
+            resize_keyboard=True,  # Уменьшаем размер кнопок
+            one_time_keyboard=True  # Скрываем клавиатуру после выбора
+        )
+
+        # Отправляем информацию о заказе с клавиатурой
+        await message.answer(orders_text, reply_markup=keyboard)
+
 
 
 

@@ -201,31 +201,26 @@ def get_user_cart(
 
         return keyboard.adjust(*sizes).as_markup()
 
+# Генерация кнопок для каждого заказа
+async def generate_order_buttons(order_id: int) -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(text="На главную 🏠", callback_data="main_menu"),
+        InlineKeyboardButton(text="Удалить", callback_data=f"delete_order_{order_id}")
+    ]
+    keyboard = InlineKeyboardMarkup(row_width=2)
+    keyboard.add(*buttons)
+    return keyboard
 
 
 
-
-# Функция для создания кнопок "Назад", "Корзина", "Купить"
-# from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-#
-# def get_product_buttons(category_id: int, product_id: int):
-#     """
-#     Функция для создания клавиатуры с кнопками для продукта.
-#     :param category_id: ID категории, из которой был выбран товар
-#     :param product_id: ID продукта
-#     :return: InlineKeyboardMarkup с кнопками
-#     """
-#     keyboard = []
-#
-#     # Кнопка "Главное меню"
-#     keyboard.append([InlineKeyboardButton(text="Главное меню", callback_data="main_menu")])
-#
-#     # Добавляем кнопки "Корзина" и "Купить"
-#     keyboard.append([InlineKeyboardButton(text="Корзина 🛒", callback_data="cart_view")])
-#     keyboard.append([InlineKeyboardButton(text="Купить 💵", callback_data=f"buy_{product_id}")])
-#
-#     return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
+def create_status_buttons():
+    keyboard = InlineKeyboardMarkup(row_width=1)
+    keyboard.add(
+        InlineKeyboardButton(text="Выданные", callback_data="view_delivered_orders"),
+        InlineKeyboardButton(text="В обработке", callback_data="view_processing_orders"),
+        InlineKeyboardButton(text="Готовы к получению", callback_data="view_ready_orders"),
+    )
+    return keyboard
 
 
 
