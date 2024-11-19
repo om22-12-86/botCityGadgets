@@ -534,7 +534,7 @@ async def display_orders(message, orders):
 
 
 # Функция для удаления заказа
-# Обработчик для удаления заказа
+
 async def delete_order(session: AsyncSession, callback_query: CallbackQuery):
     callback_data = callback_query.data
     if not callback_data.startswith("delete_order_"):

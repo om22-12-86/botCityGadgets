@@ -584,11 +584,10 @@ async def handle_order_action(callback: types.CallbackQuery, session: AsyncSessi
         await callback.answer(f"Статус заказа обновлен на '{new_status}'.")
     elif action == "delete":
         # Логика удаления заказа
-        await delete_order(session, order_id)
+        await delete_order(session, callback)  # Передаем callback, а не order_id
         await callback.answer(f"Заказ №{order_id} был удален.")
     else:
         await callback.answer("Неизвестное действие.")
-
 
 
 
