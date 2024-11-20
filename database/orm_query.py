@@ -534,36 +534,28 @@ async def display_orders(message, orders):
 
 
 # Функция для удаления заказа
-
 async def delete_order(session: AsyncSession, callback_query: CallbackQuery):
-    callback_data = callback_query.data
-    if not callback_data.startswith("delete_order_"):
-        return
+    try:
+        # Убедимся, что данные содержат корректный идентификатор
+        data_parts = callback_query.data.split("_")
+        if len(data_parts) < 3 or not data_parts[1].isdigit():
+            await callback_query.answer("Некорректный формат данных для удаления заказа.")
+            return
 
-    # Извлекаем id заказа
-    order_id = int(callback_data.split("_")[-1])
+        # Извлекаем id заказа
+        order_id = int(data_parts[1])
 
-    # Получаем заказ
-    query = select(Order).where(Order.id == order_id)
-    result = await session.execute(query)
-    order = result.scalar_one_or_none()
+        # Удаляем связанные записи OrderItem
+        await session.execute(delete(OrderItem).where(OrderItem.order_id == order_id))
+        # Удаляем сам заказ
+        await session.execute(delete(Order).where(Order.id == order_id))
+        await session.commit()
 
-    if not order:
-        await callback_query.answer("Этот заказ не найден.")
-        return
+        await callback_query.answer(f"Заказ №{order_id} успешно удалён.")
+    except Exception as e:
+        await session.rollback()
+        await callback_query.answer(f"Ошибка при удалении заказа: {e}")
 
-    # Удаляем товары из заказа
-    await session.execute(select(OrderItem).filter(OrderItem.order_id == order_id).delete())
-
-    # Удаляем сам заказ
-    await session.execute(select(Order).filter(Order.id == order_id).delete())
-    await session.commit()
-
-    # Подтверждаем удаление
-    await callback_query.answer("Заказ успешно удален.")
-
-    # Отправляем обновленное сообщение
-    await send_user_orders(session, order.user_id, callback_query.message)
 
 
 
