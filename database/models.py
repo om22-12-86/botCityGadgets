@@ -95,3 +95,16 @@ class OrderItem(Base):
 
     order: Mapped["Order"] = relationship("Order", back_populates="items")
     product: Mapped["Product"] = relationship("Product")
+
+
+class OrderHistory(Base):
+    __tablename__ = 'order_history'
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    order_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    total_cost: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    created: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
+    updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
+    deleted_at: Mapped[DateTime] = mapped_column(DateTime, nullable=True)

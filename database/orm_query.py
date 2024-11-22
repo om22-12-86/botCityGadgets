@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 import random
 from decimal import Decimal
 from datetime import datetime
-from database.models import Banner, Cart, Category, Product, User, Order, OrderItem
+from database.models import Banner, Cart, Category, Product, User, Order, OrderItem, OrderHistory
 import logging
 
 logging.basicConfig(level=logging.INFO)
@@ -575,3 +575,33 @@ async def send_user_orders(session: AsyncSession, user_id: int, message: types.M
         order_info = f"Заказ №{order.order_number}\nСтатус: {order.status}\nОбщая стоимость: {order.total_cost} руб."
         keyboard = await generate_order_buttons(order.id)
         await message.answer(order_info, reply_markup=keyboard)
+
+
+async def move_order_to_history(session: AsyncSession, order_id: int):
+    query = select(Order).filter(Order.id == order_id)
+    result = await session.execute(query)
+    order = result.scalar()
+
+    if not order:
+        return False
+
+    history_entry = OrderHistory(
+        user_id=order.user_id,
+        order_number=order.order_number,
+        status=order.status,
+        total_cost=order.total_cost,
+        created=order.created,
+        updated=order.updated,
+        deleted_at=datetime.now()
+    )
+    session.add(history_entry)
+    await session.delete(order)
+    await session.commit()
+    return True
+
+
+
+async def get_deleted_orders(session: AsyncSession):
+    query = select(OrderHistory).order_by(OrderHistory.deleted_at.desc())
+    result = await session.execute(query)
+    return result.scalars().all()

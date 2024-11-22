@@ -8,10 +8,15 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.types import CallbackQuery
 from sqlalchemy.future import select
 from database.engine import SessionLocal
-from database.models import Order, User
+from database.models import Order, User, OrderHistory
+import logging
+
+logging.basicConfig(level=logging.INFO)
 
 
 from database.orm_query import (
+    get_deleted_orders,
+    move_order_to_history,
     display_orders_to_user,
     delete_order,
     get_order_items,
@@ -409,17 +414,15 @@ async def show_orders_menu(message: types.Message):
     # Кнопки для выбора фильтра по статусу заказов
     buttons = [
         InlineKeyboardButton(text="Все", callback_data="view_all_orders"),
-        InlineKeyboardButton(text="Выданные", callback_data="view_delivered_orders"),
-        InlineKeyboardButton(text="В обработке", callback_data="view_processing_orders"),
-        InlineKeyboardButton(text="Готовы", callback_data="view_ready_orders"),
+        InlineKeyboardButton(text="История заказа", callback_data="view_order_history"),
+        InlineKeyboardButton(text="Поиск", callback_data="search_orders")  # Оставляем кнопку для поиска
     ]
 
     # Создаем клавиатуру с кнопками для выбора, в два столбика
     keyboard = InlineKeyboardMarkup(
         inline_keyboard=[
             [buttons[0], buttons[1]],  # В два столбика
-            [buttons[2], buttons[3]],  # В два столбика
-            [InlineKeyboardButton(text="Поиск", callback_data="search_orders")]  # Оставляем кнопку для поиска
+            [buttons[2]]               # Поиск в отдельной строке
         ],
         resize_keyboard=True,  # Делаем клавиатуру компактной
         one_time_keyboard=True  # Клавиатура скрывается после выбора
@@ -427,6 +430,53 @@ async def show_orders_menu(message: types.Message):
 
     # Отправка сообщения с предложением выбрать действие
     await message.answer("Выберите действие для просмотра заказов:", reply_markup=keyboard)
+
+
+
+@admin_router.callback_query(F.data == "view_order_history")
+async def view_order_history(callback: CallbackQuery, session: AsyncSession):
+    """
+    Обработчик для отображения истории удаленных заказов.
+    """
+    logging.info("Обработчик 'История заказов' вызван.")  # Лог вызова обработчика
+
+    # Запрос к таблице `order_history` для получения всех записей
+    query = select(OrderHistory).order_by(OrderHistory.deleted_at.desc())
+    result = await session.execute(query)
+    orders = result.scalars().all()
+
+    # Проверка наличия записей в `order_history`
+    if not orders:
+        await callback.message.answer("История заказов пуста.")
+        return
+
+    logging.info(f"Найдено {len(orders)} записей в истории.")  # Лог количества записей
+
+    # Перебираем удаленные заказы и отправляем администратору
+    for order in orders:
+        deleted_time = order.deleted_at.strftime("%d.%m.%Y %H:%M") if order.deleted_at else "Не указано"
+        created_time = order.created.strftime("%d.%m.%Y %H:%M")
+        updated_time = order.updated.strftime("%d.%m.%Y %H:%M")
+
+        # Формируем текст сообщения для каждого заказа
+        message_text = (
+            f"Заказ № {order.order_number}\n"
+            f"Пользователь ID: {order.user_id}\n"
+            f"Дата создания: {created_time}\n"
+            f"Дата обновления: {updated_time}\n"
+            f"Дата удаления: {deleted_time}\n"
+            f"Статус: {order.status}\n"
+            f"Общая стоимость: {order.total_cost:.2f} ₽"
+        )
+
+        await callback.message.answer(message_text)
+
+    # Подтверждаем пользователю, что все данные отображены
+    await callback.answer("История заказов успешно отображена.")
+
+
+
+
 
 
 # Обработчик callback для фильтрации заказов по статусу
@@ -584,7 +634,7 @@ async def handle_order_action(callback: types.CallbackQuery, session: AsyncSessi
         await callback.answer(f"Статус заказа обновлен на '{new_status}'.")
     elif action == "delete":
         # Логика удаления заказа
-        await delete_order(session, callback)  # Передаем callback, а не order_id
+        await delete_order(callback, session)  # Передаем callback, а не order_id
         await callback.answer(f"Заказ №{order_id} был удален.")
     else:
         await callback.answer("Неизвестное действие.")
@@ -677,10 +727,54 @@ async def handle_status_change(callback_query: types.CallbackQuery, session: Asy
 
 
 
+
+
+
+
 @admin_router.callback_query(F.data == "view_all_orders")
 async def view_all_orders(callback: types.CallbackQuery, session: AsyncSession):
-    orders = await get_orders(session)
-    await display_orders(callback, orders)
+    """
+    Display all active orders.
+    """
+    query = select(Order).filter(Order.status != "Удален").order_by(Order.created.desc())
+    result = await session.execute(query)
+    orders = result.scalars().all()
+
+    if not orders:
+        await callback.message.answer("Нет доступных заказов.")
+        return
+
+    for order in orders:
+        user = await get_user_by_id(session, order.user_id)
+        user_info = f"Пользователь: {user.first_name} {user.last_name} (ID: {user.user_id})" if user else "Пользователь: Неизвестен"
+        created_time = order.created.strftime("%d.%m.%Y %H:%M")
+
+        await callback.message.answer(
+            f"Заказ № {order.order_number}\n"
+            f"{user_info}\n"
+            f"Дата и время заказа: {created_time}\n"
+            f"Статус: {order.status}\n"
+            f"Общая стоимость: {order.total_cost:.2f} ₽"
+        )
+
+
+@admin_router.callback_query(F.data.startswith("order_") and F.data.endswith("_delete"))
+async def delete_order(callback: CallbackQuery, session: AsyncSession):
+    """
+    Обработчик для удаления заказа.
+    """
+    # Извлекаем ID заказа из callback_data
+    order_id = int(callback.data.split("_")[1])
+
+    # Перемещаем заказ в `order_history`
+    success = await move_order_to_history(session, order_id)
+
+    if success:
+        await callback.answer(f"Заказ № {order_id} успешно удален и добавлен в историю.")
+    else:
+        await callback.answer(f"Не удалось найти заказ с ID {order_id}.")
+
+
 
 
 # Обработчики для callback-данных
