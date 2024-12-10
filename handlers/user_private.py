@@ -27,7 +27,8 @@ async def start_cmd(message: types.Message, session: AsyncSession):
     media, reply_markup = await get_menu_content(session, level=0, menu_name="main")
     await message.answer_photo(media.media, caption=media.caption, reply_markup=reply_markup)
 
-# Обработчик для выбора категории
+
+# Обработчик для выбора категории (для пользователя)
 @user_private_router.callback_query(F.data.startswith('category_'))
 async def show_products_by_category(callback: types.CallbackQuery, session: AsyncSession):
     category_id = int(callback.data.split('_')[-1])
@@ -50,25 +51,24 @@ async def show_products_by_category(callback: types.CallbackQuery, session: Asyn
 
     # Перебираем товары на текущей странице и отправляем их пользователю
     for product in page_products:
+        # Проверка изображения: если оно отсутствует, используем дефолтное изображение
+        product_image = product.image if product.image else "/Users/om/Documents/Python/botCityGadgets/uploads/no_image.jpg"
+
         await callback.message.answer_photo(
-            product.image,
-            caption=f"<b>{product.name}</b>\n"
-                    f"<b>{product.sku}</b>\n"
-                    f"{product.description}\n"
-                    f"Стоимость: {round(product.price, 2)} ₽\n"
-                    f"В наличии: {product.stock} шт.\n"
-                    f"<b>Товар {paginator.page} из {paginator.pages}</b>",
+            product_image,  # Если изображения нет, подставляем путь к изображению по умолчанию
+            caption=(
+                f"<b>{product.name}</b>\n"
+                f"Артикул: {product.sku}\n"
+                f"{product.description}\n"
+                f"Стоимость: {round(product.price, 2)} ₽\n"
+                f"В наличии: {product.stock} шт.\n"
+                f"<b>Товар {paginator.page} из {paginator.pages}</b>"
+            ),
             parse_mode='HTML',
-            # Теперь передаем `pagination_btns` и `current_page` в `get_product_buttons`
             reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
         )
 
     await callback.answer()
-
-
-
-
-
 
 
 # Функция для добавления товара в корзину

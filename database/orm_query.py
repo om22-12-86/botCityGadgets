@@ -11,6 +11,8 @@ from decimal import Decimal
 from datetime import datetime
 from database.models import Banner, Cart, Category, Product, User, Order, OrderItem, OrderHistory
 import logging
+import pandas as pd
+import os
 
 logging.basicConfig(level=logging.INFO)
 
@@ -605,3 +607,124 @@ async def get_deleted_orders(session: AsyncSession):
     query = select(OrderHistory).order_by(OrderHistory.deleted_at.desc())
     result = await session.execute(query)
     return result.scalars().all()
+
+
+
+
+
+# Функция для загрузки изображения из локального пути и возвращения его file_id
+async def upload_local_image_to_telegram(bot, image_path: str) -> str:
+    """Загружает локальное изображение в Telegram и возвращает file_id"""
+    try:
+        # Проверка существования файла
+        if not os.path.exists(image_path):
+            raise FileNotFoundError(f"Файл {image_path} не найден.")
+
+        # Создаем объект InputFile
+        photo = InputFile(image_path)
+
+        # Загружаем изображение в Telegram
+        sent_photo = await bot.send_photo(chat_id="@your_channel", photo=photo)
+
+        # Получаем file_id изображения
+        file_id = sent_photo.photo[-1].file_id
+        logging.info(f"Загружено изображение, file_id: {file_id}")
+        return file_id
+    except Exception as e:
+        logging.error(f"Ошибка при загрузке изображения: {e}")
+        return None
+
+
+# Функция для отправки стандартного изображения
+async def send_default_image(callback):
+    """Отправляет стандартное изображение из локального пути"""
+    try:
+        # Создаем объект InputFile для локального изображения
+        photo = InputFile(DEFAULT_IMAGE_PATH)
+
+        # Отправляем изображение
+        await callback.message.answer_photo(photo, caption="Стандартное изображение")
+    except Exception as e:
+        logging.error(f"Ошибка при отправке стандартного изображения: {e}")
+        await callback.message.answer("Не удалось загрузить стандартное изображение.")
+
+
+# Функция для получения и сохранения file_id стандартного изображения
+async def get_and_store_default_image_id(bot) -> str:
+    """Загружает стандартное изображение и возвращает file_id"""
+    try:
+        # Загружаем стандартное изображение в Telegram
+        default_image_file_id = await upload_local_image_to_telegram(bot, DEFAULT_IMAGE_PATH)
+        logging.info(f"Стандартное изображение загружено, file_id: {default_image_file_id}")
+        return default_image_file_id
+    except Exception as e:
+        logging.error(f"Ошибка при загрузке стандартного изображения: {e}")
+        return None
+
+
+# Функция для удаления старых товаров из категории
+async def delete_old_products_in_category(session: AsyncSession, category_id: int):
+    """Удаляет все товары из выбранной категории"""
+    query = delete(Product).where(Product.category_id == category_id)
+    await session.execute(query)  # Выполняем удаление
+    await session.commit()  # Подтверждаем изменения
+    logging.info(f"Все товары из категории {category_id} были удалены.")
+
+
+# Функция для отправки изображения продукта или стандартного изображения
+async def send_product_image(product, callback, default_image_file_id=None):
+    """Отправляет изображение продукта или стандартное изображение"""
+    try:
+        if product.image:
+            # Если есть изображение, отправляем его
+            image_to_send = product.image
+        else:
+            # Если изображения нет, используем file_id стандартного изображения
+            if default_image_file_id:
+                image_to_send = default_image_file_id  # Используем заранее загруженный file_id
+            else:
+                # Загружаем стандартное изображение в Telegram
+                photo = InputFile(DEFAULT_IMAGE_PATH)
+                sent_photo = await callback.bot.send_photo(chat_id="@your_channel", photo=photo)
+                image_to_send = sent_photo.photo[-1].file_id  # Получаем file_id стандартного изображения
+
+        # Проверяем, что image_to_send является допустимым URL или file_id
+        if isinstance(image_to_send, str) and (image_to_send.startswith("http") or image_to_send.startswith("https")):
+            # Если это URL, отправляем его
+            await callback.message.answer_photo(image_to_send, caption=f"{product.name}\n{product.description}")
+        else:
+            # Если это file_id или путь, отправляем его
+            await callback.message.answer_photo(image_to_send, caption=f"{product.name}\n{product.description}")
+
+    except Exception as e:
+        logging.error(f"Ошибка при отправке изображения для товара {product.name}: {e}")
+        await callback.message.answer("Ошибка при отправке изображения.")
+
+
+# Функция для получения изображения продукта или стандартного изображения
+async def get_product_image(product, bot=None):
+    """Возвращает изображение продукта или стандартное изображение."""
+    if product.image:
+        return product.image  # Если изображение есть, возвращаем его
+    else:
+        # Путь к стандартному изображению
+        return DEFAULT_IMAGE_PATH
+
+
+# Функция для загрузки стандартного изображения в Telegram и возвращения file_id
+async def upload_default_image(bot):
+    """Загружает стандартное изображение в Telegram и возвращает file_id."""
+    try:
+        # Создаем объект InputFile для стандартного изображения
+        photo = InputFile(DEFAULT_IMAGE_PATH)
+
+        # Загружаем изображение в Telegram
+        sent_photo = await bot.send_photo(chat_id="@your_channel", photo=photo)
+
+        # Получаем file_id стандартного изображения
+        default_image_file_id = sent_photo.photo[-1].file_id
+        logging.info(f"Стандартное изображение загружено, file_id: {default_image_file_id}")
+        return default_image_file_id
+    except Exception as e:
+        logging.error(f"Ошибка при загрузке стандартного изображения: {e}")
+        return None

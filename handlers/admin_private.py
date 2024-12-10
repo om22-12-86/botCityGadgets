@@ -8,13 +8,23 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.types import CallbackQuery
 from sqlalchemy.future import select
 from database.engine import SessionLocal
-from database.models import Order, User, OrderHistory
+from database.models import Order, User, OrderHistory, Category
 import logging
+import pandas as pd
+import os
+
 
 logging.basicConfig(level=logging.INFO)
 
 
 from database.orm_query import (
+upload_local_image_to_telegram,
+send_default_image,
+get_and_store_default_image_id,
+delete_old_products_in_category,
+send_product_image,
+get_product_image,
+upload_default_image,
     get_deleted_orders,
     move_order_to_history,
     display_orders_to_user,
@@ -71,15 +81,14 @@ async def show_products(message: types.Message, session: AsyncSession):
     await message.answer("Выберите категорию или выполните поиск", reply_markup=get_callback_btns(btns=btns))
 
 
-
-
-# Обработчик для показа товаров в категории
+# Обработчик для показа товаров в категории (для админа)
 @admin_router.callback_query(F.data.startswith('category_'))
 async def show_category_products(callback: types.CallbackQuery, session: AsyncSession):
     data = callback.data.split('_')
     category_id = int(data[1])
     page = int(data[2]) if len(data) > 2 else 1  # Устанавливаем текущую страницу
 
+    # Получаем список товаров в категории
     products = await orm_get_products(session, category_id)
     paginator = Paginator(products, page=page, per_page=3)
     page_products = paginator.get_page()
@@ -91,14 +100,13 @@ async def show_category_products(callback: types.CallbackQuery, session: AsyncSe
     if paginator.has_next():
         pagination_btns["След. ▶"] = f"category_{category_id}_{paginator.page + 1}"
 
-    # Проверка значений pagination_btns и current_page для отладки
-    print("pagination_btns:", pagination_btns)
-    print("current_page:", paginator.page)
-
     # Отправка товаров с кнопками пагинации
     for product in page_products:
+        # Проверка изображения: если оно отсутствует, используем дефолтное изображение
+        product_image = product.image if product.image else "/Users/om/Documents/Python/botCityGadgets/uploads/no_image.jpg"
+
         await callback.message.answer_photo(
-            product.image,
+            product_image,  # Если изображения нет, подставляем путь к изображению по умолчанию
             caption=(
                 f"<b>{product.name}</b>\n"
                 f"Артикул: {product.sku}\n"
@@ -872,6 +880,120 @@ async def view_cancelled_orders(callback: types.CallbackQuery, session: AsyncSes
             await callback.message.answer(f"Заказ #{order.id} - {order.status}")
     else:
         await callback.message.answer("Нет заказов со статусом 'Отменен'.")
+
+
+
+
+@admin_router.message(F.text == 'Загрузить файл Excel')
+async def handle_excel_upload(message: types.Message, state: FSMContext):
+    # Получаем список категорий из базы
+    async with SessionLocal() as session:
+        result = await session.execute(select(Category))
+        categories = result.scalars().all()
+        btns = {category.name: str(category.id) for category in categories}
+        btns["Отмена"] = "cancel"
+
+        # Запрашиваем у пользователя категорию для загрузки
+        await message.answer("Выберите категорию для загрузки товаров из Excel",
+                             reply_markup=get_callback_btns(btns=btns))
+        await state.set_state('choose_category')
+
+
+
+@admin_router.callback_query(StateFilter('choose_category'))
+async def choose_category_callback(callback: types.CallbackQuery, state: FSMContext):
+    category_id = int(callback.data)
+    await state.update_data(category=category_id)
+    await callback.message.answer("Загрузите файл Excel")
+    await state.set_state('upload_excel')
+
+
+
+
+
+@admin_router.message(StateFilter('upload_excel'), F.document)
+async def handle_file_upload(message: types.Message, state: FSMContext, session: AsyncSession):
+    temp_file_path = None
+    try:
+        # Получаем ID категории
+        category_id = (await state.get_data()).get('category')
+        if not category_id:
+            await message.answer("Категория не выбрана.")
+            return
+
+        # Загрузка файла
+        file_id = message.document.file_id
+        file_info = await message.bot.get_file(file_id)
+        file_path = file_info.file_path
+        file = await message.bot.download_file(file_path)
+
+        temp_file_path = f"temp_{file_id}.xlsx"
+        with open(temp_file_path, 'wb') as f:
+            f.write(file.getvalue())
+
+        # Чтение Excel
+        try:
+            df = pd.read_excel(temp_file_path)
+        except Exception as e:
+            raise ValueError(f"Ошибка чтения Excel-файла: {e}")
+
+        # Проверка колонок
+        required_columns = {'name', 'sku', 'category', 'price', 'stock'}
+        if not required_columns.issubset(df.columns):
+            raise ValueError("Excel-файл не содержит всех необходимых колонок.")
+
+        # Заменяем NaN значения на дефолтные
+        df['name'] = df['name'].fillna('Без названия')  # Пример дефолтного значения для имени
+        df['sku'] = df['sku'].fillna('Неизвестно')  # Пример дефолтного значения для SKU
+        df['description'] = df['description'].fillna('Нет описания')  # Пример для описания
+        df['price'] = pd.to_numeric(df['price'], errors='coerce').fillna(0)
+        df['stock'] = pd.to_numeric(df['stock'], errors='coerce').fillna(0)
+        df['category'] = pd.to_numeric(df['category'], errors='coerce').fillna(category_id)  # Используем выбранную категорию, если значение NaN
+
+        # Удаление старых товаров
+        await delete_old_products_in_category(session, category_id)
+
+        # Добавление товаров
+        for _, row in df.iterrows():
+            product_data = {
+                "name": row['name'],
+                "sku": row['sku'],
+                "description": row['description'],
+                "price": row['price'],
+                "image": None,  # Не указываем изображение, если его нет
+                "stock": row['stock'],
+                "category": category_id,
+            }
+            await orm_add_product(session, product_data)
+
+        await message.answer("Товары успешно добавлены.")
+
+    except Exception as e:
+        await message.answer(f"Ошибка при обработке файла: {e}")
+
+    finally:
+        if temp_file_path:
+            os.remove(temp_file_path)
+
+
+
+
+
+
+
+
+
+@admin_router.message(StateFilter('change_product_image'), F.photo)
+async def update_product_image(message: types.Message, state: FSMContext, session: AsyncSession):
+    product_id = (await state.get_data())['product_id']
+    new_image_id = message.photo[-1].file_id  # Получаем file_id изображения
+
+    # Обновляем изображение в базе
+    await orm_update_product(session, product_id, {"image": new_image_id})
+
+    await message.answer("Изображение успешно обновлено.")
+    await state.clear()
+
 
 
 
