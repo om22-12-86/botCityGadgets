@@ -72,24 +72,40 @@ def pages(paginator: Paginator):
 # Функция для отображения списка товаров в категории
 async def products(session: AsyncSession, level: int, category: int, page: int):
     products = await orm_get_products(session, category_id=category)
+    print(f"Товары в категории {category}: {products}")  # Добавьте лог
+    if not products:
+        print(f"Нет товаров в категории {category}")
+
     paginator = Paginator(products, page=page)
 
-    # Получаем первый товар на странице
-    product = paginator.get_page()[0]
+    # Получаем товары на текущей странице
+    page_products = paginator.get_page()
 
-    # Формируем изображение с описанием товара
-    image = InputMediaPhoto(
-        media=product.image,
-        caption=(
-            f"<b>{product.name}</b>\n"
-            f"Артикул: {product.sku}\n"
-            f"{product.description}\n"
-            f"Стоимость: {round(product.price, 2)} ₽\n"
-            f"В наличии: {product.stock} шт.\n"
-            f"<b>Товар {paginator.page} из {paginator.pages}</b>"
-        ),
-        parse_mode='HTML'
-    )
+    # Проверяем, если нет товаров, отправляем соответствующее сообщение
+    if not page_products:
+        print(f"Товары в категории {category} не найдены.")
+        return None, None  # Возвращаем None, если товаров нет
+
+    # Получаем первый товар на странице
+    product = page_products[0]
+
+    # Если у товара есть изображение, используем InputMediaPhoto
+    if product.image:
+        image = InputMediaPhoto(
+            media=product.image,
+            caption=(
+                f"<b>{product.name}</b>\n"
+                f"Артикул: {product.sku}\n"
+                f"{product.description}\n"
+                f"Стоимость: {round(product.price, 2)} ₽\n"
+                f"В наличии: {product.stock} шт.\n"
+                f"<b>Товар {paginator.page} из {paginator.pages}</b>"
+            ),
+            parse_mode='HTML'
+        )
+    else:
+        # Если изображения нет, отправляем только описание товара
+        image = None  # В случае отсутствия изображения, мы не передаем InputMediaPhoto
 
     pagination_btns = pages(paginator)
     kbds = get_products_btns(
@@ -99,7 +115,9 @@ async def products(session: AsyncSession, level: int, category: int, page: int):
         pagination_btns=pagination_btns,
         product_id=product.id,
     )
+
     return image, kbds
+
 
 
 

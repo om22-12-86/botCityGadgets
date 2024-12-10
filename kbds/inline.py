@@ -12,19 +12,28 @@ class MenuCallBack(CallbackData, prefix="menu"):
     product_id: int | None = None
 
 
-
-
-# Функция для создания кнопок с учетом пагинации
+# Функция для создания кнопок пагинации
 def get_product_buttons(category_id, product_id, pagination_btns, current_page):
     keyboard = InlineKeyboardBuilder()
+
+    # Кнопки для удаления и изменения
     keyboard.add(InlineKeyboardButton(text="Удалить", callback_data=f"delete_{product_id}"))
     keyboard.add(InlineKeyboardButton(text="Изменить", callback_data=f"change_{product_id}"))
 
-    # Добавляем кнопки пагинации, если они есть
+    # Добавляем кнопки пагинации с указанием категории и страницы
     for text, callback_data in pagination_btns.items():
-        keyboard.add(InlineKeyboardButton(text=text, callback_data=callback_data))
+        if callback_data == "previous":
+            new_callback_data = f"category_{category_id}_{current_page - 1}"
+        elif callback_data == "next":
+            new_callback_data = f"category_{category_id}_{current_page + 1}"
+        else:
+            new_callback_data = callback_data  # Для других случаев, если это не пагинация
 
-    return keyboard.adjust(2).as_markup()
+        keyboard.add(InlineKeyboardButton(text=text, callback_data=new_callback_data))
+
+    return keyboard.adjust(2).as_markup()  # Убираем лишние пустые строки
+
+
 
 
 

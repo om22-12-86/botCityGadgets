@@ -31,44 +31,64 @@ async def start_cmd(message: types.Message, session: AsyncSession):
 # Обработчик для выбора категории (для пользователя)
 @user_private_router.callback_query(F.data.startswith('category_'))
 async def show_products_by_category(callback: types.CallbackQuery, session: AsyncSession):
-    category_id = int(callback.data.split('_')[-1])
-    products = await orm_get_products(session, category_id)
+    try:
+        category_id = int(callback.data.split('_')[-1])
+        products = await orm_get_products(session, category_id)
 
-    if not products:
-        await callback.message.answer("В этой категории товары не найдены.")
-        return
+        # Если товары отсутствуют
+        if not products:
+            await callback.message.answer("В этой категории товары не найдены.")
+            return
 
-    # Создаем объект Paginator с начальной страницей
-    paginator = Paginator(products, page=1, per_page=3)  # Настройте начальную страницу и товары на странице
-    page_products = paginator.get_page()  # Получаем товары для текущей страницы
+        paginator = Paginator(products, page=1, per_page=3)
+        page_products = paginator.get_page()
 
-    # Определяем кнопки для пагинации
-    pagination_btns = {}
-    if paginator.has_previous():
-        pagination_btns["◀ Пред."] = f"category_{category_id}_{paginator.page - 1}"
-    if paginator.has_next():
-        pagination_btns["След. ▶"] = f"category_{category_id}_{paginator.page + 1}"
+        pagination_btns = {}
+        if paginator.has_previous():
+            pagination_btns["◀ Пред."] = f"category_{category_id}_{paginator.page - 1}"
+        if paginator.has_next():
+            pagination_btns["След. ▶"] = f"category_{category_id}_{paginator.page + 1}"
 
-    # Перебираем товары на текущей странице и отправляем их пользователю
-    for product in page_products:
-        # Проверка изображения: если оно отсутствует, используем дефолтное изображение
-        product_image = product.image if product.image else "/Users/om/Documents/Python/botCityGadgets/uploads/no_image.jpg"
+        # Перебираем товары на текущей странице
+        for product in page_products:
+            if product.image:
+                # Если есть изображение, отправляем его
+                await callback.message.answer_photo(
+                    product.image,  # Изображение товара
+                    caption=(
+                        f"<b>{product.name}</b>\n"
+                        f"Артикул: {product.sku}\n"
+                        f"{product.description}\n"
+                        f"Стоимость: {round(product.price, 2)} ₽\n"
+                        f"В наличии: {product.stock} шт.\n"
+                        f"<b>Товар {paginator.page} из {paginator.pages}</b>"
+                    ),
+                    parse_mode='HTML',
+                    reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
+                )
+            else:
+                # Если изображения нет, отправляем только текст
+                await callback.message.answer(
+                    text=(
+                        f"<b>{product.name}</b>\n"
+                        f"Артикул: {product.sku}\n"
+                        f"{product.description}\n"
+                        f"Стоимость: {round(product.price, 2)} ₽\n"
+                        f"В наличии: {product.stock} шт.\n"
+                        f"<b>Товар {paginator.page} из {paginator.pages}</b>"
+                    ),
+                    parse_mode='HTML',
+                    reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
+                )
 
-        await callback.message.answer_photo(
-            product_image,  # Если изображения нет, подставляем путь к изображению по умолчанию
-            caption=(
-                f"<b>{product.name}</b>\n"
-                f"Артикул: {product.sku}\n"
-                f"{product.description}\n"
-                f"Стоимость: {round(product.price, 2)} ₽\n"
-                f"В наличии: {product.stock} шт.\n"
-                f"<b>Товар {paginator.page} из {paginator.pages}</b>"
-            ),
-            parse_mode='HTML',
-            reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
-        )
+    except Exception as e:
+        print(f"Ошибка при загрузке товаров: {e}")
+        await callback.message.answer("Произошла ошибка при загрузке товаров.")
 
-    await callback.answer()
+
+
+
+
 
 
 # Функция для добавления товара в корзину
@@ -168,7 +188,7 @@ async def start_search(callback: types.CallbackQuery, state: FSMContext):
 # Обработчик поиска товаров
 @user_private_router.message(UserSearchProduct.keywords, F.text)
 async def search_products(message: types.Message, session: AsyncSession, state: FSMContext):
-    search_query = message.text.strip()
+    search_query = message.text.strip()  # Извлекаем текст запроса
     products = await orm_get_products_by_keywords(session, search_query)
 
     if not products:
@@ -176,22 +196,35 @@ async def search_products(message: types.Message, session: AsyncSession, state: 
         await state.clear()
         return
 
+    # Отправка найденных товаров
     for product in products:
-        await message.answer_photo(
-            product.image,
-            caption=(
-                f"<b>{product.name}</b>\n"
-                f"Артикул: {product.sku}\n"
-                f"{product.description}\n"
-                f"Цена: {product.price} ₽\n"
-                f"В наличии: {product.stock} шт.\n"
-            ),
-            parse_mode='HTML',
-            reply_markup=get_user_products_btns(product_id=product.id)
-        )
+        if product.image:
+            await message.answer_photo(
+                product.image,
+                caption=(
+                    f"<b>{product.name}</b>\n"
+                    f"Артикул: {product.sku}\n"
+                    f"{product.description}\n"
+                    f"Цена: {round(product.price, 2)} ₽\n"
+                    f"В наличии: {product.stock} шт.\n"
+                ),
+                parse_mode='HTML',
+                reply_markup=get_user_products_btns(product_id=product.id)
+            )
+        else:
+            await message.answer(
+                text=(
+                    f"<b>{product.name}</b>\n"
+                    f"Артикул: {product.sku}\n"
+                    f"{product.description}\n"
+                    f"Цена: {round(product.price, 2)} ₽\n"
+                    f"В наличии: {product.stock} шт.\n"
+                ),
+                parse_mode='HTML',
+                reply_markup=get_user_products_btns(product_id=product.id)
+            )
+
     await state.clear()
-
-
 
 
 # Функция для добавления товара в корзину по нажатию "Купить"

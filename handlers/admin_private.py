@@ -81,7 +81,6 @@ async def show_products(message: types.Message, session: AsyncSession):
     await message.answer("Выберите категорию или выполните поиск", reply_markup=get_callback_btns(btns=btns))
 
 
-# Обработчик для показа товаров в категории (для админа)
 @admin_router.callback_query(F.data.startswith('category_'))
 async def show_category_products(callback: types.CallbackQuery, session: AsyncSession):
     data = callback.data.split('_')
@@ -90,36 +89,55 @@ async def show_category_products(callback: types.CallbackQuery, session: AsyncSe
 
     # Получаем список товаров в категории
     products = await orm_get_products(session, category_id)
-    paginator = Paginator(products, page=page, per_page=3)
+    if not products:
+        await callback.message.answer("В этой категории товары не найдены.")
+        return
+
+    paginator = Paginator(products, page=page)
     page_products = paginator.get_page()
 
     # Определяем кнопки пагинации
     pagination_btns = {}
     if paginator.has_previous():
-        pagination_btns["◀ Пред."] = f"category_{category_id}_{paginator.page - 1}"
+        pagination_btns["◀ Пред."] = "previous"
     if paginator.has_next():
-        pagination_btns["След. ▶"] = f"category_{category_id}_{paginator.page + 1}"
+        pagination_btns["След. ▶"] = "next"
+    print(f"Текущая страница: {paginator.page}, Всего страниц: {paginator.pages}")
 
     # Отправка товаров с кнопками пагинации
     for product in page_products:
-        # Проверка изображения: если оно отсутствует, используем дефолтное изображение
-        product_image = product.image if product.image else "/Users/om/Documents/Python/botCityGadgets/uploads/no_image.jpg"
-
-        await callback.message.answer_photo(
-            product_image,  # Если изображения нет, подставляем путь к изображению по умолчанию
-            caption=(
-                f"<b>{product.name}</b>\n"
-                f"Артикул: {product.sku}\n"
-                f"{product.description}\n"
-                f"Стоимость: {round(product.price, 2)} ₽\n"
-                f"В наличии: {product.stock} шт.\n"
-                f"<b>Товар {paginator.page} из {paginator.pages}</b>"
-            ),
-            parse_mode='HTML',
-            reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
-        )
+        if product.image:
+            # Если у товара есть изображение, используем InputMediaPhoto
+            await callback.message.answer_photo(
+                product.image,  # Отправляем изображение
+                caption=(
+                    f"<b>{product.name}</b>\n"
+                    f"Артикул: {product.sku}\n"
+                    f"{product.description}\n"
+                    f"Стоимость: {round(product.price, 2)} ₽\n"
+                    f"В наличии: {product.stock} шт.\n"
+                    f"<b>Товар {paginator.page} из {paginator.pages}</b>"
+                ),
+                parse_mode='HTML',
+                reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
+            )
+        else:
+            # Если изображения нет, отправляем только описание товара
+            await callback.message.answer(
+                text=(
+                    f"<b>{product.name}</b>\n"
+                    f"Артикул: {product.sku}\n"
+                    f"{product.description}\n"
+                    f"Стоимость: {round(product.price, 2)} ₽\n"
+                    f"В наличии: {product.stock} шт.\n"
+                    f"<b>Товар {paginator.page} из {paginator.pages}</b>"
+                ),
+                parse_mode='HTML',
+                reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
+            )
 
     await callback.answer("ОК, вот список товаров ⏫")
+
 
 
 

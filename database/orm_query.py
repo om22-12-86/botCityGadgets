@@ -216,16 +216,17 @@ async def orm_reduce_product_in_cart(session: AsyncSession, user_id: int, produc
 
 
 async def orm_get_products_by_keywords(session: AsyncSession, keywords: str):
-    """Поиск продуктов по ключевым словам."""
-    keyword_list = keywords.split()
+    """Поиск продуктов по ключевым словам, включая артикул."""
+    keyword_list = keywords.split()  # Разбиваем ключевые слова на список
     query = select(Product).where(
         or_(
-            *[Product.name.ilike(f"%{keyword}%") for keyword in keyword_list],
-            *[Product.description.ilike(f"%{keyword}%") for keyword in keyword_list]
+            *[Product.name.ilike(f"%{keyword}%") for keyword in keyword_list],  # Поиск по имени товара
+            *[Product.description.ilike(f"%{keyword}%") for keyword in keyword_list],  # Поиск по описанию
+            *[Product.sku.ilike(f"%{keyword}%") for keyword in keyword_list]  # Поиск по артикулу
         )
     )
     result = await session.execute(query)
-    return result.scalars().all()
+    return result.scalars().all()  # Возвращаем все найденные продукты
 
 
 async def orm_get_user_orders(session: AsyncSession, user_id: int):
