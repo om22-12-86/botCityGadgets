@@ -91,11 +91,13 @@ async def orm_add_product(session: AsyncSession, data: dict):
 
 
 
+# Функция получения товаров из базы данных для категории
 async def orm_get_products(session: AsyncSession, category_id: int):
     query = select(Product).where(Product.category_id == category_id)
     result = await session.execute(query)
     return result.scalars().all()
 
+# Функция получения одного товара
 async def orm_get_product(session: AsyncSession, product_id: int):
     query = select(Product).where(Product.id == product_id)
     result = await session.execute(query)

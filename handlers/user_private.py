@@ -44,7 +44,7 @@ async def show_products_by_category(callback: types.CallbackQuery, session: Asyn
             return
 
         # Создаем пагинатор для товаров
-        paginator = Paginator(products, page=1, per_page=3)
+        paginator = Paginator(products, page=1, per_page=1)
         page_products = paginator.get_page()
 
         # Создаем кнопки пагинации
@@ -113,10 +113,7 @@ async def add_to_cart(callback: types.CallbackQuery, callback_data: MenuCallBack
     await callback.answer("Товар добавлен в корзину.")
 
 
-
-
-
-
+# Основной обработчик callback-запросов
 # Основной обработчик callback-запросов
 @user_private_router.callback_query(MenuCallBack.filter())
 async def user_menu(callback: types.CallbackQuery, callback_data: MenuCallBack, session: AsyncSession, state: FSMContext):
@@ -148,6 +145,7 @@ async def user_menu(callback: types.CallbackQuery, callback_data: MenuCallBack, 
 
     # Проверка на изменение содержимого
     if isinstance(media, types.InputMediaPhoto):
+        # Если изображение есть
         if callback.message.photo and callback.message.caption == media.caption and callback.message.reply_markup == reply_markup:
             await callback.answer("Контент не изменился.")
             return
@@ -155,15 +153,18 @@ async def user_menu(callback: types.CallbackQuery, callback_data: MenuCallBack, 
         await callback.message.edit_media(media=media, reply_markup=reply_markup)
 
     elif isinstance(media, str):
+        # Если изображения нет, обновляем только текст
         if callback.message.text == media and callback.message.reply_markup == reply_markup:
             await callback.answer("Контент не изменился.")
             return
+        # Обновляем только текст, без изображений
         await callback.message.edit_text(text=media, reply_markup=reply_markup)
 
     else:
         await callback.message.answer("Произошла ошибка при загрузке контента.")
 
     await callback.answer()
+
 
 
 

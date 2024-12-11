@@ -121,7 +121,7 @@ async def products(session: AsyncSession, level: int, category: int, page: int):
 
 
 
-# Функция для работы с корзиной товаров
+## Функция для работы с корзиной товаров
 async def carts(session: AsyncSession, level: int, menu_name: str, page: int, user_id: int, product_id: int | None):
     if menu_name == "delete":
         await orm_delete_from_cart(session, user_id, product_id)
@@ -155,18 +155,32 @@ async def carts(session: AsyncSession, level: int, menu_name: str, page: int, us
         cart_price = round(cart.stock * product.price, 2)
         total_price = round(sum(item.stock * item.product.price for item in carts), 2)
 
-        image = InputMediaPhoto(
-            media=product.image,
-            caption=(
+        # Проверка на наличие изображения
+        if product.image:
+            # Если есть изображение, используем InputMediaPhoto
+            image = InputMediaPhoto(
+                media=product.image,
+                caption=(
+                    f"<b>{product.name}</b>\n"
+                    f"Артикул: {product.sku}\n"
+                    f"{product.description}\n"
+                    f"Цена: {product.price}₽ x {cart.stock} = {cart_price}₽\n"
+                    f"Товар {paginator.page} из {paginator.pages} в корзине.\n"
+                    f"Общая стоимость товаров в корзине {total_price}₽"
+                ),
+                parse_mode='HTML'
+            )
+        else:
+            # Если изображения нет, создаем только текстовое описание
+            caption = (
                 f"<b>{product.name}</b>\n"
                 f"Артикул: {product.sku}\n"
                 f"{product.description}\n"
                 f"Цена: {product.price}₽ x {cart.stock} = {cart_price}₽\n"
                 f"Товар {paginator.page} из {paginator.pages} в корзине.\n"
                 f"Общая стоимость товаров в корзине {total_price}₽"
-            ),
-            parse_mode='HTML'
-        )
+            )
+            image = caption  # Просто текст без изображения
 
         pagination_btns = pages(paginator)
         kbds = get_user_cart(
@@ -175,7 +189,11 @@ async def carts(session: AsyncSession, level: int, menu_name: str, page: int, us
             pagination_btns=pagination_btns,
             product_id=product.id,
         )
+
     return image, kbds
+
+
+
 
 
 

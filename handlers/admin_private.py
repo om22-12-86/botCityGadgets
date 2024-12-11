@@ -46,7 +46,7 @@ upload_default_image,
 )
 
 from filters.chat_types import ChatTypeFilter, IsAdmin
-from kbds.inline import get_callback_btns, create_status_buttons
+from kbds.inline import get_callback_btns, create_status_buttons, get_product_buttons
 from kbds.reply import get_keyboard
 
 admin_router = Router()
@@ -84,20 +84,26 @@ async def show_products(message: types.Message, session: AsyncSession):
 @admin_router.callback_query(F.data.startswith('category_'))
 async def show_category_products(callback: types.CallbackQuery, session: AsyncSession):
     try:
+        # Извлекаем данные из callback
         data = callback.data.split('_')
         category_id = int(data[1])
         page = int(data[2]) if len(data) > 2 else 1  # Устанавливаем текущую страницу
 
         # Получаем список товаров в категории
         products = await orm_get_products(session, category_id)
+
         if not products:
             await callback.message.answer("В этой категории товары не найдены.")
             return
 
-        paginator = Paginator(products, page=page, per_page=3)
+        # Пагинация: создаем объект Paginator и получаем товары на текущей странице
+        paginator = Paginator(products, page=page, per_page=1)  # Показываем 1 товар на странице
         page_products = paginator.get_page()
-        print(f"Total products: {len(products)}")
-        print(f"Products on this page: {len(page_products)}")
+
+        # Если на текущей странице нет товаров
+        if not page_products:
+            await callback.message.answer("На этой странице товаров нет.")
+            return
 
         # Определяем кнопки пагинации
         pagination_btns = {}
@@ -105,7 +111,6 @@ async def show_category_products(callback: types.CallbackQuery, session: AsyncSe
             pagination_btns["◀ Пред."] = f"category_{category_id}_{paginator.page - 1}"
         if paginator.has_next():
             pagination_btns["След. ▶"] = f"category_{category_id}_{paginator.page + 1}"
-        print(f"Pagination buttons: {pagination_btns}")
 
         # Лог для текущей страницы и общего количества страниц
         print(f"Текущая страница: {paginator.page}, Всего страниц: {paginator.pages}")
@@ -143,10 +148,6 @@ async def show_category_products(callback: types.CallbackQuery, session: AsyncSe
     except Exception as e:
         print(f"Ошибка при загрузке товаров: {e}")
         await callback.message.answer("Произошла ошибка при загрузке товаров.")
-
-
-
-
 
 
 
