@@ -32,7 +32,10 @@ async def start_cmd(message: types.Message, session: AsyncSession):
 @user_private_router.callback_query(F.data.startswith('category_'))
 async def show_products_by_category(callback: types.CallbackQuery, session: AsyncSession):
     try:
+        # Извлекаем ID категории
         category_id = int(callback.data.split('_')[-1])
+
+        # Получаем все товары в категории
         products = await orm_get_products(session, category_id)
 
         # Если товары отсутствуют
@@ -40,9 +43,11 @@ async def show_products_by_category(callback: types.CallbackQuery, session: Asyn
             await callback.message.answer("В этой категории товары не найдены.")
             return
 
+        # Создаем пагинатор для товаров
         paginator = Paginator(products, page=1, per_page=3)
         page_products = paginator.get_page()
 
+        # Создаем кнопки пагинации
         pagination_btns = {}
         if paginator.has_previous():
             pagination_btns["◀ Пред."] = f"category_{category_id}_{paginator.page - 1}"
@@ -51,32 +56,27 @@ async def show_products_by_category(callback: types.CallbackQuery, session: Asyn
 
         # Перебираем товары на текущей странице
         for product in page_products:
+            caption = (
+                f"<b>{product.name}</b>\n"
+                f"Артикул: {product.sku}\n"
+                f"{product.description}\n"
+                f"Стоимость: {round(product.price, 2)} ₽\n"
+                f"В наличии: {product.stock} шт.\n"
+                f"<b>Товар {paginator.page} из {paginator.pages}</b>"
+            )
+
+            # Если есть изображение, отправляем его
             if product.image:
-                # Если есть изображение, отправляем его
                 await callback.message.answer_photo(
                     product.image,  # Изображение товара
-                    caption=(
-                        f"<b>{product.name}</b>\n"
-                        f"Артикул: {product.sku}\n"
-                        f"{product.description}\n"
-                        f"Стоимость: {round(product.price, 2)} ₽\n"
-                        f"В наличии: {product.stock} шт.\n"
-                        f"<b>Товар {paginator.page} из {paginator.pages}</b>"
-                    ),
+                    caption=caption,
                     parse_mode='HTML',
                     reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
                 )
             else:
-                # Если изображения нет, отправляем только текст
+                # Если изображения нет, отправляем только информацию о товаре
                 await callback.message.answer(
-                    text=(
-                        f"<b>{product.name}</b>\n"
-                        f"Артикул: {product.sku}\n"
-                        f"{product.description}\n"
-                        f"Стоимость: {round(product.price, 2)} ₽\n"
-                        f"В наличии: {product.stock} шт.\n"
-                        f"<b>Товар {paginator.page} из {paginator.pages}</b>"
-                    ),
+                    text=caption,
                     parse_mode='HTML',
                     reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
                 )
@@ -84,9 +84,6 @@ async def show_products_by_category(callback: types.CallbackQuery, session: Asyn
     except Exception as e:
         print(f"Ошибка при загрузке товаров: {e}")
         await callback.message.answer("Произошла ошибка при загрузке товаров.")
-
-
-
 
 
 

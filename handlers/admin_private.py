@@ -83,60 +83,67 @@ async def show_products(message: types.Message, session: AsyncSession):
 
 @admin_router.callback_query(F.data.startswith('category_'))
 async def show_category_products(callback: types.CallbackQuery, session: AsyncSession):
-    data = callback.data.split('_')
-    category_id = int(data[1])
-    page = int(data[2]) if len(data) > 2 else 1  # Устанавливаем текущую страницу
+    try:
+        data = callback.data.split('_')
+        category_id = int(data[1])
+        page = int(data[2]) if len(data) > 2 else 1  # Устанавливаем текущую страницу
 
-    # Получаем список товаров в категории
-    products = await orm_get_products(session, category_id)
-    if not products:
-        await callback.message.answer("В этой категории товары не найдены.")
-        return
+        # Получаем список товаров в категории
+        products = await orm_get_products(session, category_id)
+        if not products:
+            await callback.message.answer("В этой категории товары не найдены.")
+            return
 
-    paginator = Paginator(products, page=page)
-    page_products = paginator.get_page()
+        paginator = Paginator(products, page=page, per_page=3)
+        page_products = paginator.get_page()
+        print(f"Total products: {len(products)}")
+        print(f"Products on this page: {len(page_products)}")
 
-    # Определяем кнопки пагинации
-    pagination_btns = {}
-    if paginator.has_previous():
-        pagination_btns["◀ Пред."] = "previous"
-    if paginator.has_next():
-        pagination_btns["След. ▶"] = "next"
-    print(f"Текущая страница: {paginator.page}, Всего страниц: {paginator.pages}")
+        # Определяем кнопки пагинации
+        pagination_btns = {}
+        if paginator.has_previous():
+            pagination_btns["◀ Пред."] = f"category_{category_id}_{paginator.page - 1}"
+        if paginator.has_next():
+            pagination_btns["След. ▶"] = f"category_{category_id}_{paginator.page + 1}"
+        print(f"Pagination buttons: {pagination_btns}")
 
-    # Отправка товаров с кнопками пагинации
-    for product in page_products:
-        if product.image:
-            # Если у товара есть изображение, используем InputMediaPhoto
-            await callback.message.answer_photo(
-                product.image,  # Отправляем изображение
-                caption=(
-                    f"<b>{product.name}</b>\n"
-                    f"Артикул: {product.sku}\n"
-                    f"{product.description}\n"
-                    f"Стоимость: {round(product.price, 2)} ₽\n"
-                    f"В наличии: {product.stock} шт.\n"
-                    f"<b>Товар {paginator.page} из {paginator.pages}</b>"
-                ),
-                parse_mode='HTML',
-                reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
-            )
-        else:
-            # Если изображения нет, отправляем только описание товара
-            await callback.message.answer(
-                text=(
-                    f"<b>{product.name}</b>\n"
-                    f"Артикул: {product.sku}\n"
-                    f"{product.description}\n"
-                    f"Стоимость: {round(product.price, 2)} ₽\n"
-                    f"В наличии: {product.stock} шт.\n"
-                    f"<b>Товар {paginator.page} из {paginator.pages}</b>"
-                ),
-                parse_mode='HTML',
-                reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
+        # Лог для текущей страницы и общего количества страниц
+        print(f"Текущая страница: {paginator.page}, Всего страниц: {paginator.pages}")
+
+        # Отправка товаров с кнопками пагинации
+        for product in page_products:
+            caption = (
+                f"<b>{product.name}</b>\n"
+                f"Артикул: {product.sku}\n"
+                f"{product.description}\n"
+                f"Стоимость: {round(product.price, 2)} ₽\n"
+                f"В наличии: {product.stock} шт.\n"
+                f"<b>Товар {paginator.page} из {paginator.pages}</b>"
             )
 
-    await callback.answer("ОК, вот список товаров ⏫")
+            # Если есть изображение, отправляем его
+            if product.image:
+                await callback.message.answer_photo(
+                    product.image,  # Отправляем изображение товара
+                    caption=caption,
+                    parse_mode='HTML',
+                    reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
+                )
+            else:
+                # Если изображения нет, отправляем только текстовую информацию
+                await callback.message.answer(
+                    text=caption,
+                    parse_mode='HTML',
+                    reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
+                )
+
+        # Завершаем обработку
+        await callback.answer("ОК, вот список товаров ⏫")
+
+    except Exception as e:
+        print(f"Ошибка при загрузке товаров: {e}")
+        await callback.message.answer("Произошла ошибка при загрузке товаров.")
+
 
 
 
@@ -400,6 +407,7 @@ async def admin_start_search(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer("Введите ключевые слова для поиска:")
     await state.set_state(AdminSearchProduct.keywords)
 
+
 # Обработка ввода ключевых слов для поиска
 @admin_router.message(AdminSearchProduct.keywords, F.text)
 async def admin_search_products(message: types.Message, session: AsyncSession, state: FSMContext):
@@ -410,24 +418,59 @@ async def admin_search_products(message: types.Message, session: AsyncSession, s
         return
 
     for product in products:
-        await message.answer_photo(
-            product.image,
-            caption=f"<b>{product.name}</b>\n"
-                    f"<b>{product.sku}</b>\n"
-                    f"{product.description}\n"
-                    f"Стоимость: {round(product.price, 2)} ₽\n"
-                    f"В наличии: {product.stock} шт.",
-            parse_mode='HTML',
-            reply_markup=get_callback_btns(
-                btns={
-                    "Удалить": f"delete_{product.id}",
-                    "Изменить": f"change_{product.id}",
-                },
-                sizes=(2,)
-            )
+        caption = (
+            f"<b>{product.name}</b>\n"
+            f"<b>{product.sku}</b>\n"
+            f"{product.description}\n"
+            f"Стоимость: {round(product.price, 2)} ₽\n"
+            f"В наличии: {product.stock} шт."
         )
 
+        if product.image:
+            # Если есть изображение, отправляем фото
+            try:
+                await message.answer_photo(
+                    product.image,  # Отправляем изображение товара
+                    caption=caption,
+                    parse_mode='HTML',
+                    reply_markup=get_callback_btns(
+                        btns={
+                            "Удалить": f"delete_{product.id}",
+                            "Изменить": f"change_{product.id}",
+                        },
+                        sizes=(2,)
+                    )
+                )
+            except Exception as e:
+                print(f"Ошибка при отправке изображения: {e}")
+                # Если ошибка при отправке фото, отправляем только описание
+                await message.answer(
+                    text=caption,
+                    parse_mode='HTML',
+                    reply_markup=get_callback_btns(
+                        btns={
+                            "Удалить": f"delete_{product.id}",
+                            "Изменить": f"change_{product.id}",
+                        },
+                        sizes=(2,)
+                    )
+                )
+        else:
+            # Если изображения нет, отправляем только описание товара
+            await message.answer(
+                text=caption,
+                parse_mode='HTML',
+                reply_markup=get_callback_btns(
+                    btns={
+                        "Удалить": f"delete_{product.id}",
+                        "Изменить": f"change_{product.id}",
+                    },
+                    sizes=(2,)
+                )
+            )
+
     await state.clear()  # Очищаем состояние после завершения поиска
+
 
 
 
