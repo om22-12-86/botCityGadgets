@@ -105,46 +105,57 @@ def get_user_catalog_btns(*, level: int, categories: list, sizes: tuple[int] = (
 
 
 # Функция для создания кнопок для найденных товаров с пагинацией
-def get_user_products_btns(category_id: int, product_id: int, paginator: Paginator, page: int):
+def get_user_products_btns(
+        product_id, category_id, paginator=None, page=1, level=2, sizes=(2, 1)
+):
+    # Инициализируем объект клавиатуры
     keyboard = InlineKeyboardBuilder()
 
-    # Добавляем кнопку "Назад"
+    # Добавляем кнопку "Назад", которая переводит пользователя в каталог
     keyboard.add(InlineKeyboardButton(
         text="Назад",
-        callback_data=f"user_category_{category_id}_{page - 1}" if page > 1 else "user_category_1_1"
+        callback_data=MenuCallBack(level=level - 1, menu_name='catalog', category=category_id).pack()
     ))
 
-    # Добавляем кнопку "Корзина"
+    # Добавляем кнопку для перехода в корзину
     keyboard.add(InlineKeyboardButton(
         text="Корзина 🛒",
-        callback_data=MenuCallBack(level=3, menu_name="cart").pack()
+        callback_data=MenuCallBack(level=3, menu_name='cart').pack()
     ))
 
     # Добавляем кнопку "Купить"
     keyboard.add(InlineKeyboardButton(
         text="Купить 💵",
-        callback_data=MenuCallBack(level=page, menu_name="add_to_cart", product_id=product_id).pack()
+        callback_data=MenuCallBack(level=level, menu_name='add_to_cart', product_id=product_id).pack()
     ))
 
-    # Кнопки пагинации
-    pagination_btns = {}
-    if paginator.has_previous():
-        pagination_btns["◀ Пред."] = f"user_category_{category_id}_{paginator.page - 1}"
-    if paginator.has_next():
-        pagination_btns["След. ▶"] = f"user_category_{category_id}_{paginator.page + 1}"
+    # Разделение строк для кнопок
+    keyboard.adjust(*sizes)
 
-    # Добавляем кнопки пагинации
-    if pagination_btns:
-        for text, data in pagination_btns.items():
-            keyboard.add(InlineKeyboardButton(
-                text=text,
-                callback_data=data
+    # Если paginator не None, добавляем кнопки пагинации
+    if paginator:
+        row = []
+        if paginator.has_previous():
+            row.append(InlineKeyboardButton(
+                text="◀ Пред. Стр.",
+                callback_data=MenuCallBack(level=level, menu_name="previous", category=category_id, page=page - 1).pack()
+            ))
+        if paginator.has_next():
+            row.append(InlineKeyboardButton(
+                text="След. Стр. ▶",
+                callback_data=MenuCallBack(level=level, menu_name="next", category=category_id, page=page + 1).pack()
             ))
 
-    # Устанавливаем размеры кнопок
-    keyboard.adjust(2, 1)  # по 2 кнопки в строке
+        # Добавляем кнопки пагинации в клавиатуру
+        if row:
+            keyboard.row(*row)
 
     return keyboard.as_markup()
+
+
+
+
+
 
 
 def get_products_btns(
