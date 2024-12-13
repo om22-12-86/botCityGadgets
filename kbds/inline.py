@@ -2,6 +2,7 @@ from aiogram.filters.callback_data import CallbackData
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram import types
+from utils.paginator import Paginator
 
 
 class MenuCallBack(CallbackData, prefix="menu"):
@@ -15,33 +16,33 @@ class MenuCallBack(CallbackData, prefix="menu"):
 
 
 def get_product_buttons(category_id, product_id, pagination_btns, current_page):
-    # Список для кнопок
-    inline_keyboard = []
-
     # Кнопки для удаления и изменения товара (для админа)
-    inline_keyboard.append([
-        InlineKeyboardButton(text="Удалить", callback_data=f"delete_{product_id}"),
-        InlineKeyboardButton(text="Изменить", callback_data=f"change_{product_id}")
-    ])
+    inline_keyboard = [
+        [
+            InlineKeyboardButton(text="Удалить", callback_data=f"admin_delete_{product_id}"),
+            InlineKeyboardButton(text="Изменить", callback_data=f"admin_change_{product_id}")
+        ]
+    ]
 
     # Добавляем кнопки пагинации
-    pagination_buttons = []
-    for text, callback_data in pagination_btns.items():
-        # Если это кнопки для пагинации
-        if callback_data == "previous":
-            new_callback_data = f"category_{category_id}_{current_page - 1}"
-        elif callback_data == "next":
-            new_callback_data = f"category_{category_id}_{current_page + 1}"
-        else:
-            new_callback_data = callback_data  # Для других случаев, если это не пагинация
+    pagination_buttons = [
+        InlineKeyboardButton(
+            text=text,
+            callback_data=(
+                f"category_{category_id}_{current_page - 1}" if text == "◀ Пред." else
+                f"category_{category_id}_{current_page + 1}" if text == "След. ▶" else callback_data
+            )
+        )
+        for text, callback_data in pagination_btns.items()
+    ]
 
-        pagination_buttons.append(InlineKeyboardButton(text=text, callback_data=new_callback_data))
-
-    inline_keyboard.append(pagination_buttons)
+    # Если есть кнопки пагинации, добавляем их в клавиатуру
+    if pagination_buttons:
+        inline_keyboard.append(pagination_buttons)
 
     # Создаем и возвращаем клавиатуру
-    keyboard = InlineKeyboardMarkup(inline_keyboard=inline_keyboard, row_width=2)
-    return keyboard
+    return InlineKeyboardMarkup(inline_keyboard=inline_keyboard, row_width=2)
+
 
 
 
@@ -101,14 +102,16 @@ def get_user_catalog_btns(*, level: int, categories: list, sizes: tuple[int] = (
 
     return keyboard.adjust(*sizes).as_markup()
 
-# Функция для создания кнопок для найденных товаров
-def get_user_products_btns(product_id: int, level: int = 2, sizes=(2, 1)):
+
+
+# Функция для создания кнопок для найденных товаров с пагинацией
+def get_user_products_btns(category_id: int, product_id: int, paginator: Paginator, page: int):
     keyboard = InlineKeyboardBuilder()
 
     # Добавляем кнопку "Назад"
     keyboard.add(InlineKeyboardButton(
         text="Назад",
-        callback_data=MenuCallBack(level=level - 1, menu_name="catalog").pack()
+        callback_data=f"user_category_{category_id}_{page - 1}" if page > 1 else "user_category_1_1"
     ))
 
     # Добавляем кнопку "Корзина"
@@ -120,14 +123,28 @@ def get_user_products_btns(product_id: int, level: int = 2, sizes=(2, 1)):
     # Добавляем кнопку "Купить"
     keyboard.add(InlineKeyboardButton(
         text="Купить 💵",
-        callback_data=MenuCallBack(level=level, menu_name="add_to_cart", product_id=product_id).pack()
+        callback_data=MenuCallBack(level=page, menu_name="add_to_cart", product_id=product_id).pack()
     ))
 
+    # Кнопки пагинации
+    pagination_btns = {}
+    if paginator.has_previous():
+        pagination_btns["◀ Пред."] = f"user_category_{category_id}_{paginator.page - 1}"
+    if paginator.has_next():
+        pagination_btns["След. ▶"] = f"user_category_{category_id}_{paginator.page + 1}"
+
+    # Добавляем кнопки пагинации
+    if pagination_btns:
+        for text, data in pagination_btns.items():
+            keyboard.add(InlineKeyboardButton(
+                text=text,
+                callback_data=data
+            ))
+
     # Устанавливаем размеры кнопок
-    keyboard.adjust(*sizes)
+    keyboard.adjust(2, 1)  # по 2 кнопки в строке
 
     return keyboard.as_markup()
-
 
 
 def get_products_btns(

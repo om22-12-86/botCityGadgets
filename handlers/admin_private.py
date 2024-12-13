@@ -84,10 +84,18 @@ async def show_products(message: types.Message, session: AsyncSession):
 @admin_router.callback_query(F.data.startswith('category_'))
 async def show_category_products(callback: types.CallbackQuery, session: AsyncSession):
     try:
+        # Логируем полученные данные callback
+        print(f"Получен callback: {callback.data}")
+
         # Извлекаем данные из callback
         data = callback.data.split('_')
-        category_id = int(data[1])
-        page = int(data[2]) if len(data) > 2 else 1  # Устанавливаем текущую страницу
+
+        # Проверка, что данные корректны (минимум 2 элемента: category_id и page)
+        if len(data) < 3:
+            raise ValueError("Неверный формат данных callback")
+
+        category_id = int(data[1])  # Идентификатор категории
+        page = int(data[2]) if len(data) > 2 else 1  # Текущая страница (по умолчанию 1)
 
         # Получаем список товаров в категории
         products = await orm_get_products(session, category_id)
@@ -97,7 +105,7 @@ async def show_category_products(callback: types.CallbackQuery, session: AsyncSe
             return
 
         # Пагинация: создаем объект Paginator и получаем товары на текущей странице
-        paginator = Paginator(products, page=page, per_page=1)  # Показываем 1 товар на странице
+        paginator = Paginator(products, page=page, per_page=5)  # Показываем 5 товаров на странице
         page_products = paginator.get_page()
 
         # Если на текущей странице нет товаров
@@ -105,15 +113,15 @@ async def show_category_products(callback: types.CallbackQuery, session: AsyncSe
             await callback.message.answer("На этой странице товаров нет.")
             return
 
+        # Логируем текущую страницу и общее количество страниц
+        print(f"Текущая страница: {paginator.page}, Всего страниц: {paginator.pages}")
+
         # Определяем кнопки пагинации
         pagination_btns = {}
         if paginator.has_previous():
             pagination_btns["◀ Пред."] = f"category_{category_id}_{paginator.page - 1}"
         if paginator.has_next():
             pagination_btns["След. ▶"] = f"category_{category_id}_{paginator.page + 1}"
-
-        # Лог для текущей страницы и общего количества страниц
-        print(f"Текущая страница: {paginator.page}, Всего страниц: {paginator.pages}")
 
         # Отправка товаров с кнопками пагинации
         for product in page_products:
@@ -146,18 +154,29 @@ async def show_category_products(callback: types.CallbackQuery, session: AsyncSe
         await callback.answer("ОК, вот список товаров ⏫")
 
     except Exception as e:
+        # Логируем ошибку
         print(f"Ошибка при загрузке товаров: {e}")
+        # Отправляем сообщение о проблеме
         await callback.message.answer("Произошла ошибка при загрузке товаров.")
 
 
 
-@admin_router.callback_query(F.data.startswith("delete_"))
-async def delete_product_callback(callback: types.CallbackQuery, session: AsyncSession):
-    product_id = callback.data.split("_")[-1]
-    await orm_delete_product(session, int(product_id))
 
-    await callback.answer("Товар удален")
-    await callback.message.answer("Товар удален!")
+
+
+@admin_router.callback_query(F.data.startswith('admin_delete_'))
+async def admin_delete_product(callback: types.CallbackQuery, session: AsyncSession):
+    try:
+        product_id = int(callback.data.split('_')[-1])
+        logging.info(f"Удаление товара с ID: {product_id}")
+        await orm_delete_product(session, product_id)
+        await callback.answer("Товар удален!")
+        await callback.message.delete()  # Удаление сообщения с товаром
+    except Exception as e:
+        logging.error(f"Ошибка при удалении товара: {e}")
+        await callback.answer("Произошла ошибка при удалении товара.")
+
+
 
 
 ################# Микро FSM для загрузки/изменения баннеров ############################
@@ -225,15 +244,23 @@ class AddProduct(StatesGroup):
     }
 
 
+# Обработка кнопки изменения товара
+@admin_router.callback_query(F.data.startswith('admin_change_'))
+async def change_product_callback(callback: types.CallbackQuery, session: AsyncSession, state: FSMContext):
+    product_id = int(callback.data.split('_')[-1])
 
-@admin_router.callback_query(StateFilter(None), F.data.startswith("change_"))
-async def change_product_callback(callback: types.CallbackQuery, state: FSMContext, session: AsyncSession):
-    product_id = callback.data.split("_")[-1]
-    product_for_change = await orm_get_product(session, int(product_id))
-    AddProduct.product_for_change = product_for_change
-    await callback.answer()
-    await callback.message.answer("Введите название товара", reply_markup=types.ReplyKeyboardRemove())
-    await state.set_state(AddProduct.name)
+    product = await orm_get_product(session, product_id)
+
+    if product:
+        await state.update_data(product=product)
+
+        # Отправляем сообщение в чат
+        await callback.message.answer("Введите новое название товара:", reply_markup=types.ReplyKeyboardRemove())
+
+        # Переходим в состояние для ввода нового названия товара
+        await state.set_state(AddProduct.name)
+    else:
+        await callback.message.answer("Товар не найден.")
 
 
 @admin_router.message(StateFilter(None), F.text == "Добавить товар")
@@ -450,8 +477,8 @@ async def admin_search_products(message: types.Message, session: AsyncSession, s
                     parse_mode='HTML',
                     reply_markup=get_callback_btns(
                         btns={
-                            "Удалить": f"delete_{product.id}",
-                            "Изменить": f"change_{product.id}",
+                            "Удалить": f"admin_delete_{product.id}",
+                            "Изменить": f"admin_change_{product.id}",
                         },
                         sizes=(2,)
                     )
@@ -463,8 +490,8 @@ async def admin_search_products(message: types.Message, session: AsyncSession, s
                 parse_mode='HTML',
                 reply_markup=get_callback_btns(
                     btns={
-                        "Удалить": f"delete_{product.id}",
-                        "Изменить": f"change_{product.id}",
+                        "Удалить": f"admin_delete_{product.id}",
+                        "Изменить": f"admin_change_{product.id}",
                     },
                     sizes=(2,)
                 )

@@ -28,31 +28,32 @@ async def start_cmd(message: types.Message, session: AsyncSession):
     await message.answer_photo(media.media, caption=media.caption, reply_markup=reply_markup)
 
 
-# Обработчик для выбора категории (для пользователя)
 @user_private_router.callback_query(F.data.startswith('category_'))
-async def show_products_by_category(callback: types.CallbackQuery, session: AsyncSession):
+async def show_category_products(callback: types.CallbackQuery, session: AsyncSession):
     try:
-        # Извлекаем ID категории
-        category_id = int(callback.data.split('_')[-1])
+        # Извлекаем данные из callback
+        data = callback.data.split('_')
+        category_id = int(data[1])
+        page = int(data[2]) if len(data) > 2 else 1  # Устанавливаем текущую страницу
 
-        # Получаем все товары в категории
+        # Получаем список товаров в категории
         products = await orm_get_products(session, category_id)
 
-        # Если товары отсутствуют
         if not products:
             await callback.message.answer("В этой категории товары не найдены.")
             return
 
-        # Создаем пагинатор для товаров
-        paginator = Paginator(products, page=1, per_page=1)
+        # Пагинация: создаем объект Paginator и получаем товары на текущей странице
+        paginator = Paginator(products, page=page, per_page=5)  # Показываем 1 товар на странице
         page_products = paginator.get_page()
 
-        # Создаем кнопки пагинации
-        pagination_btns = {}
-        if paginator.has_previous():
-            pagination_btns["◀ Пред."] = f"category_{category_id}_{paginator.page - 1}"
-        if paginator.has_next():
-            pagination_btns["След. ▶"] = f"category_{category_id}_{paginator.page + 1}"
+        # Если на текущей странице нет товаров
+        if not page_products:
+            await callback.message.answer("На этой странице товаров нет.")
+            return
+
+        # Лог для текущей страницы и общего количества страниц
+        print(f"Текущая страница: {paginator.page}, Всего страниц: {paginator.pages}")
 
         # Перебираем товары на текущей странице
         for product in page_products:
@@ -68,22 +69,39 @@ async def show_products_by_category(callback: types.CallbackQuery, session: Asyn
             # Если есть изображение, отправляем его
             if product.image:
                 await callback.message.answer_photo(
-                    product.image,  # Изображение товара
+                    product.image,  # Отправляем изображение товара
                     caption=caption,
                     parse_mode='HTML',
-                    reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
+                    reply_markup=get_product_buttons(category_id, product.id, {}, paginator.page)
                 )
             else:
-                # Если изображения нет, отправляем только информацию о товаре
+                # Если изображения нет, отправляем только текстовую информацию
                 await callback.message.answer(
                     text=caption,
                     parse_mode='HTML',
-                    reply_markup=get_product_buttons(category_id, product.id, pagination_btns, paginator.page)
+                    reply_markup=get_product_buttons(category_id, product.id, {}, paginator.page)
                 )
+
+        # Создаем кнопки пагинации (внизу списка)
+        pagination_btns = {}
+        if paginator.has_previous():
+            pagination_btns["◀ Пред."] = f"category_{category_id}_{paginator.page - 1}"
+        if paginator.has_next():
+            pagination_btns["След. ▶"] = f"category_{category_id}_{paginator.page + 1}"
+
+        # Добавляем кнопки пагинации после всех товаров
+        if pagination_btns:
+            await callback.message.answer(
+                text="Выберите страницу:",
+                reply_markup=InlineKeyboardMarkup(
+                    inline_keyboard=[[InlineKeyboardButton(text=text, callback_data=data)] for text, data in pagination_btns.items()]
+                )
+            )
 
     except Exception as e:
         print(f"Ошибка при загрузке товаров: {e}")
         await callback.message.answer("Произошла ошибка при загрузке товаров.")
+
 
 
 
