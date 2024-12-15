@@ -220,7 +220,7 @@ async def prompt_for_banner_image(message: types.Message, state: FSMContext):
 
 ######################### FSM для добавления/изменения товаров админом ###################
 
-from aiogram.fsm.state import State, StatesGroup
+
 
 class AddProduct(StatesGroup):
     name = State()
@@ -249,18 +249,17 @@ class AddProduct(StatesGroup):
 async def change_product_callback(callback: types.CallbackQuery, session: AsyncSession, state: FSMContext):
     product_id = int(callback.data.split('_')[-1])
 
+    # Получаем товар по ID
     product = await orm_get_product(session, product_id)
 
     if product:
-        await state.update_data(product=product)
-
-        # Отправляем сообщение в чат
+        await state.update_data(product=product)  # Сохраняем товар в состоянии
+        AddProduct.product_for_change = product  # Устанавливаем товар для изменения
         await callback.message.answer("Введите новое название товара:", reply_markup=types.ReplyKeyboardRemove())
-
-        # Переходим в состояние для ввода нового названия товара
         await state.set_state(AddProduct.name)
     else:
         await callback.message.answer("Товар не найден.")
+
 
 
 @admin_router.message(StateFilter(None), F.text == "Добавить товар")
@@ -298,13 +297,62 @@ async def back_step_handler(message: types.Message, state: FSMContext):
         previous = step
 
 
+@admin_router.message(StateFilter("*"), F.text.casefold() == ".")
+async def leave_without_changes(message: types.Message, state: FSMContext):
+    current_state = await state.get_state()
+
+    if AddProduct.product_for_change:  # Проверяем, выбран ли товар для изменения
+        # Если товар для изменения найден, сохраняем старые значения без изменений
+        if current_state == AddProduct.name:
+            await state.update_data(name=AddProduct.product_for_change.name)
+        elif current_state == AddProduct.sku:
+            await state.update_data(sku=AddProduct.product_for_change.sku)
+        elif current_state == AddProduct.description:
+            await state.update_data(description=AddProduct.product_for_change.description)
+        elif current_state == AddProduct.category:
+            await state.update_data(category=AddProduct.product_for_change.category_id)
+        elif current_state == AddProduct.price:
+            await state.update_data(price=AddProduct.product_for_change.price)
+        elif current_state == AddProduct.image:
+            await state.update_data(image=AddProduct.product_for_change.image)
+        elif current_state == AddProduct.stock:
+            await state.update_data(stock=AddProduct.product_for_change.stock)
+
+        await message.answer("Параметр оставлен без изменений. Продолжаем редактирование.")
+    else:
+        await message.answer("Ошибка: не выбран товар для изменения.")
+
+    # Переход к следующему шагу в зависимости от текущего состояния
+    if current_state == AddProduct.name:
+        await message.answer("Введите артикул (SKU) товара")
+        await state.set_state(AddProduct.sku)
+    elif current_state == AddProduct.sku:
+        await message.answer("Введите описание товара")
+        await state.set_state(AddProduct.description)
+    elif current_state == AddProduct.description:
+        await message.answer("Выберите категорию товара")
+        await state.set_state(AddProduct.category)
+    elif current_state == AddProduct.category:
+        await message.answer("Введите стоимость товара")
+        await state.set_state(AddProduct.price)
+    elif current_state == AddProduct.price:
+        await message.answer("Отправьте фото товара")
+        await state.set_state(AddProduct.image)
+    elif current_state == AddProduct.image:
+        await message.answer("Введите количество товара")
+        await state.set_state(AddProduct.stock)
+
+
+
+
+
 @admin_router.message(AddProduct.name, F.text)
 async def add_name(message: types.Message, state: FSMContext):
     if message.text == "." and AddProduct.product_for_change:
         await state.update_data(name=AddProduct.product_for_change.name)
     else:
-        if not (5 <= len(message.text) <= 150):
-            await message.answer("Название товара должно быть от 5 до 150 символов. Введите заново.")
+        if not (5 <= len(message.text) <= 250):
+            await message.answer("Название товара должно быть от 5 до 250 символов. Введите заново.")
             return
         await state.update_data(name=message.text)
     await message.answer("Введите артикул (SKU) товара")

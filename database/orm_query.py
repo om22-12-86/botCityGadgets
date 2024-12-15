@@ -88,33 +88,22 @@ async def orm_add_product(session: AsyncSession, data: dict):
         await session.rollback()
         logging.error(f"Error adding product: {e}")
         raise
-    except Exception as e:
-        await session.rollback()
-        logging.error(f"Unexpected error: {e}")
-        raise
-
 
 
 
 # Функция получения товаров из базы данных для категории
 async def orm_get_products(session: AsyncSession, category_id: int):
-    logging.info(f"Fetching products for category_id={category_id}")
     query = select(Product).where(Product.category_id == category_id)
     result = await session.execute(query)
     return result.scalars().all()
 
-
 # Функция получения одного товара
 async def orm_get_product(session: AsyncSession, product_id: int):
-    logging.info(f"Fetching product with id={product_id}")
     query = select(Product).where(Product.id == product_id)
     result = await session.execute(query)
-    product = result.scalar()
+    return result.scalar()
 
-    if not product:
-        logging.error(f"Product with id={product_id} not found.")
 
-    return product
 
 
 async def orm_update_product(session: AsyncSession, product_id: int, data: dict):
@@ -135,22 +124,14 @@ async def orm_update_product(session: AsyncSession, product_id: int, data: dict)
     await session.commit()
 
 
-async def orm_delete_product(session: AsyncSession, product_id: int):
-    try:
-        # Проверка существования продукта
-        product = await orm_get_product(session, product_id)
-        if not product:
-            raise ValueError(f"Продукт с ID {product_id} не найден")
 
-        # Удаление
-        query = delete(Product).where(Product.id == product_id)
-        await session.execute(query)
-        await session.commit()
-        logging.info(f"Продукт с ID {product_id} успешно удален")
-    except Exception as e:
-        await session.rollback()  # Откатываем изменения в случае ошибки
-        logging.error(f"Ошибка при удалении продукта: {e}")
-        raise
+
+
+async def orm_delete_product(session: AsyncSession, product_id: int):
+    query = delete(Product).where(Product.id == product_id)
+    await session.execute(query)
+    await session.commit()
+
 
 
 # Работа с пользователями

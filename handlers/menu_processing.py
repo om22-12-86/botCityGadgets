@@ -16,6 +16,7 @@ from database.orm_query import (
 
 # Импортируем функции для создания inline-клавиатур
 from kbds.inline import (
+get_user_products_btns,
     get_products_btns,
     get_user_cart,
     get_user_catalog_btns,
@@ -108,12 +109,13 @@ async def products(session: AsyncSession, level: int, category: int, page: int):
         image = None  # В случае отсутствия изображения, мы не передаем InputMediaPhoto
 
     pagination_btns = pages(paginator)
-    kbds = get_products_btns(
-        level=level,
-        category=category,
-        page=page,
-        pagination_btns=pagination_btns,
+    kbds = get_user_products_btns(
         product_id=product.id,
+        category_id=category,  # Меняем category на category_id
+        paginator=paginator,
+        page=page,
+        level=level,
+        sizes=(2, 1)
     )
 
     return image, kbds

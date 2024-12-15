@@ -212,14 +212,8 @@ async def search_products(message: types.Message, session: AsyncSession, state: 
         await state.clear()
         return
 
-    # Создаем пагинатор
-    paginator = Paginator(products, per_page=5)
-    page = 1  # Устанавливаем начальную страницу
-
-    # Отправка найденных товаров с пагинацией
+    # Отправка найденных товаров
     for product in products:
-        category_id = product.category_id  # Предполагаем, что category_id есть в объекте product
-
         if product.image:
             await message.answer_photo(
                 product.image,
@@ -231,12 +225,7 @@ async def search_products(message: types.Message, session: AsyncSession, state: 
                     f"В наличии: {product.stock} шт.\n"
                 ),
                 parse_mode='HTML',
-                reply_markup=get_user_products_btns(
-                    product_id=product.id,
-                    category_id=category_id,  # передаем category_id
-                    paginator=paginator,  # передаем пагинатор
-                    page=page  # передаем номер страницы
-                )
+                reply_markup=get_user_products_btns(product_id=product.id)
             )
         else:
             await message.answer(
@@ -248,12 +237,7 @@ async def search_products(message: types.Message, session: AsyncSession, state: 
                     f"В наличии: {product.stock} шт.\n"
                 ),
                 parse_mode='HTML',
-                reply_markup=get_user_products_btns(
-                    product_id=product.id,
-                    category_id=category_id,  # передаем category_id
-                    paginator=paginator,  # передаем пагинатор
-                    page=page  # передаем номер страницы
-                )
+                reply_markup=get_user_products_btns(product_id=product.id)
             )
 
     await state.clear()
