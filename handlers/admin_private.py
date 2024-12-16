@@ -53,15 +53,23 @@ admin_router = Router()
 admin_router.message.filter(ChatTypeFilter(["private"]), IsAdmin())
 
 # Клавиатура для меню администратора
+
 ADMIN_KB = get_keyboard(
+"Добавить Категорию",
     "Добавить товар",
     "Ассортимент",
     "Добавить/Изменить баннер",
-    "Заказы",               # Новая кнопка для работы с заказами
-    "Загрузить файл Excel",  # Новая кнопка для загрузки файла Excel
+    "Заказы",
+    "Загрузить файл Excel",
+
     placeholder="Выберите действие",
-    sizes=(2,),
+    sizes=(3,),
 )
+
+
+
+
+
 
 # FSM для поиска товаров
 class AdminSearchProduct(StatesGroup):
@@ -70,6 +78,66 @@ class AdminSearchProduct(StatesGroup):
 @admin_router.message(Command("admin"))
 async def admin_features(message: types.Message):
     await message.answer("Что хотите сделать?", reply_markup=ADMIN_KB)
+
+
+class AddCategory(StatesGroup):
+    name = State()  # Для ввода названия категории
+    description = State()  # Для ввода описания категории
+
+
+
+
+@admin_router.message(F.text == "Добавить Категорию")
+async def add_category_prompt(message: types.Message, state: FSMContext):
+    await message.answer("Введите название новой категории:", reply_markup=types.ReplyKeyboardRemove())
+    await state.set_state(AddCategory.name)  # Переходим в состояние для ввода категории
+
+
+
+@admin_router.message(AddCategory.name, F.text)
+async def add_category_name(message: types.Message, state: FSMContext, session: AsyncSession):
+    category_name = message.text.strip()
+
+    if len(category_name) < 3:
+        await message.answer("Название категории должно быть хотя бы из 3 символов. Попробуйте снова.")
+        return
+
+    # Проверяем, существует ли категория с таким названием
+    existing_category = await orm_get_categories(session)
+    if any(category.name.lower() == category_name.lower() for category in existing_category):
+        await message.answer(f"Категория с названием '{category_name}' уже существует.")
+        return
+
+    # Сохраняем название категории в состоянии
+    await state.update_data(name=category_name)
+
+    # Переходим ко второму шагу — запросим описание категории
+    await message.answer("Введите описание категории (можно пропустить):")
+    await state.set_state(AddCategory.description)
+
+
+@admin_router.message(AddCategory.description, F.text)
+async def add_category_description(message: types.Message, state: FSMContext, session: AsyncSession):
+    category_description = message.text.strip() if message.text != "." else None
+
+    # Получаем данные из состояния
+    data = await state.get_data()
+    category_name = data.get("name")
+
+    # Создаем новый объект категории
+    new_category = Category(
+        name=category_name,
+        description=category_description
+    )
+
+    # Сохраняем категорию в базе данных
+    session.add(new_category)
+    await session.commit()
+
+    # Завершаем создание категории
+    await message.answer(f"Категория '{category_name}' успешно добавлена!", reply_markup=ADMIN_KB)
+    await state.clear()  # Очистим состояние
+
 
 
 @admin_router.message(F.text == 'Ассортимент')
