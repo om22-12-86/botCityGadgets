@@ -1,4 +1,5 @@
-from sqlalchemy import or_
+from sqlalchemy import or_, func
+from sqlalchemy.future import select
 from aiogram import types
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.types import CallbackQuery
@@ -219,17 +220,43 @@ async def orm_reduce_product_in_cart(session: AsyncSession, user_id: int, produc
 
 
 async def orm_get_products_by_keywords(session: AsyncSession, keywords: str):
-    """Поиск продуктов по ключевым словам, включая артикул."""
-    keyword_list = keywords.split()  # Разбиваем ключевые слова на список
-    query = select(Product).where(
-        or_(
-            *[Product.name.ilike(f"%{keyword}%") for keyword in keyword_list],  # Поиск по имени товара
-            *[Product.description.ilike(f"%{keyword}%") for keyword in keyword_list],  # Поиск по описанию
-            *[Product.sku.ilike(f"%{keyword}%") for keyword in keyword_list]  # Поиск по артикулу
+    """Поиск продуктов по точным словосочетаниям, ключевым словам и артикулу."""
+
+    # Разбиваем запрос на ключевые слова
+    keyword_list = keywords.split()
+
+    # Если запрос состоит из одного слова, это либо артикул, либо ключевое слово
+    if len(keyword_list) == 1:
+        query = select(Product).where(
+            or_(
+                Product.sku.ilike(f"%{keywords}%"),  # Поиск по артикулу
+                Product.name.ilike(f"%{keywords}%"),  # Поиск по имени товара
+                Product.description.ilike(f"%{keywords}%")  # Поиск по описанию товара
+            )
         )
-    )
-    result = await session.execute(query)
-    return result.scalars().all()  # Возвращаем все найденные продукты
+    else:
+        # Если запрос состоит из нескольких слов, это словосочетание
+        # Нужно искать полное совпадение фразы в названии или описании
+        query = select(Product).where(
+            or_(
+                Product.name.ilike(f"%{keywords}%"),  # Поиск по имени товара
+                Product.description.ilike(f"%{keywords}%"),  # Поиск по описанию товара
+            )
+        )
+
+    try:
+        result = await session.execute(query)
+        products = result.scalars().all()  # Получаем все найденные продукты
+    except Exception as e:
+        print(f"Ошибка при выполнении запроса: {e}")
+        return [], 0  # Возвращаем пустой список и 0 товаров в случае ошибки
+
+    # Получаем общее количество товаров для отображения
+    total_count = len(products)  # Подсчитываем количество найденных товаров
+
+    return products, total_count
+
+
 
 
 async def orm_get_user_orders(session: AsyncSession, user_id: int):

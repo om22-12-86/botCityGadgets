@@ -138,12 +138,12 @@ def get_user_products_btns(
         if paginator.has_previous():
             row.append(InlineKeyboardButton(
                 text="◀ Пред. Стр.",
-                callback_data=MenuCallBack(level=level, menu_name="previous", category=category_id, page=page - 1).pack()
+                callback_data=f"search_{category_id}_{paginator.page - 1}"  # Передаем текущий запрос и номер страницы
             ))
         if paginator.has_next():
             row.append(InlineKeyboardButton(
                 text="След. Стр. ▶",
-                callback_data=MenuCallBack(level=level, menu_name="next", category=category_id, page=page + 1).pack()
+                callback_data=f"search_{category_id}_{paginator.page + 1}"  # Передаем текущий запрос и номер страницы
             ))
 
         # Добавляем кнопки пагинации в клавиатуру
@@ -151,6 +151,7 @@ def get_user_products_btns(
             keyboard.row(*row)
 
     return keyboard.as_markup()
+
 
 
 

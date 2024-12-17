@@ -205,42 +205,58 @@ async def start_search(callback: types.CallbackQuery, state: FSMContext):
 @user_private_router.message(UserSearchProduct.keywords, F.text)
 async def search_products(message: types.Message, session: AsyncSession, state: FSMContext):
     search_query = message.text.strip()  # Извлекаем текст запроса
-    products = await orm_get_products_by_keywords(session, search_query)
 
-    if not products:
-        await message.answer("Товары не найдены.")
+    try:
+        # Получаем список товаров и общее количество
+        products, total_count = await orm_get_products_by_keywords(session, search_query)
+
+        if not products:
+            await message.answer("Товары не найдены.")
+            await state.clear()
+            return
+
+        # Отправка найденных товаров
+        for product in products:
+            if product.image:
+                await message.answer_photo(
+                    product.image,
+                    caption=(
+                        f"<b>{product.name}</b>\n"
+                        f"Артикул: {product.sku}\n"
+                        f"{product.description}\n"
+                        f"Цена: {round(product.price, 2)} ₽\n"
+                        f"В наличии: {product.stock} шт.\n"
+                    ),
+                    parse_mode='HTML',
+                    reply_markup=get_user_products_btns(
+                        product_id=product.id,
+                        category_id=product.category_id
+                    )
+                )
+            else:
+                await message.answer(
+                    text=(
+                        f"<b>{product.name}</b>\n"
+                        f"Артикул: {product.sku}\n"
+                        f"{product.description}\n"
+                        f"Цена: {round(product.price, 2)} ₽\n"
+                        f"В наличии: {product.stock} шт.\n"
+                    ),
+                    parse_mode='HTML',
+                    reply_markup=get_user_products_btns(
+                        product_id=product.id,
+                        category_id=product.category_id
+                    )
+                )
+
         await state.clear()
-        return
 
-    # Отправка найденных товаров
-    for product in products:
-        if product.image:
-            await message.answer_photo(
-                product.image,
-                caption=(
-                    f"<b>{product.name}</b>\n"
-                    f"Артикул: {product.sku}\n"
-                    f"{product.description}\n"
-                    f"Цена: {round(product.price, 2)} ₽\n"
-                    f"В наличии: {product.stock} шт.\n"
-                ),
-                parse_mode='HTML',
-                reply_markup=get_user_products_btns(product_id=product.id)
-            )
-        else:
-            await message.answer(
-                text=(
-                    f"<b>{product.name}</b>\n"
-                    f"Артикул: {product.sku}\n"
-                    f"{product.description}\n"
-                    f"Цена: {round(product.price, 2)} ₽\n"
-                    f"В наличии: {product.stock} шт.\n"
-                ),
-                parse_mode='HTML',
-                reply_markup=get_user_products_btns(product_id=product.id)
-            )
+    except Exception as e:
+        # Логирование ошибки
+        print(f"Ошибка при выполнении запроса: {e}")
+        await message.answer("Произошла ошибка при загрузке товаров.")
 
-    await state.clear()
+
 
 
 # Функция для добавления товара в корзину по нажатию "Купить"
