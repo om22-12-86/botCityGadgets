@@ -205,20 +205,87 @@ async def start_search(callback: types.CallbackQuery, state: FSMContext):
 @user_private_router.message(UserSearchProduct.keywords, F.text)
 async def search_products(message: types.Message, session: AsyncSession, state: FSMContext):
     search_query = message.text.strip()  # Извлекаем текст запроса
+    page = 1  # Начальная страница
+    per_page = 5  # Количество товаров на странице
 
     try:
         # Получаем список товаров и общее количество
-        products, total_count = await orm_get_products_by_keywords(session, search_query)
+        products, total_count = await orm_get_products_by_keywords(session, search_query, page, per_page)
 
         if not products:
             await message.answer("Товары не найдены.")
             await state.clear()
             return
 
+        # Пагинация
+        total_pages = (total_count + per_page - 1) // per_page  # Количество страниц
+        pagination_info = f"Найдено {total_count} товаров. Страница {page} из {total_pages}."
+
+        # Отправка найденных товаров
+        for product in products:
+            caption = (
+                f"<b>{product.name}</b>\n"
+                f"<b>{product.sku}</b>\n"
+                f"{product.description}\n"
+                f"Стоимость: {round(product.price, 2)} ₽\n"
+                f"В наличии: {product.stock} шт."
+            )
+
+            if product.image:
+                await message.answer_photo(
+                    product.image,
+                    caption=caption,
+                    parse_mode='HTML',
+                )
+            else:
+                await message.answer(
+                    text=caption,
+                    parse_mode='HTML',
+                )
+
+        # Кнопки пагинации
+        pagination_btns = {}
+        if page > 1:
+            pagination_btns["◀ Пред."] = f"search_{search_query}_{page - 1}"
+        if page < total_pages:
+            pagination_btns["След. ▶"] = f"search_{search_query}_{page + 1}"
+
+        if pagination_btns:
+            await message.answer(
+                text=pagination_info,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=text, callback_data=callback_data) for text, callback_data in pagination_btns.items()]
+                ])
+            )
+
+        await state.clear()
+
+    except Exception as e:
+        print(f"Ошибка при выполнении запроса: {e}")
+        await message.answer("Произошла ошибка при загрузке товаров.")
+
+
+
+
+@user_private_router.callback_query(F.data.startswith('search_'))
+async def search_pagination(callback: types.CallbackQuery, session: AsyncSession):
+    try:
+        # Получаем данные из callback_data
+        data = callback.data.split('_')
+        search_query = data[1]
+        page = int(data[2])  # Извлекаем номер страницы из callback_data
+
+        # Получаем список товаров и общее количество
+        products, total_count = await orm_get_products_by_keywords(session, search_query, page=page)
+
+        if not products:
+            await callback.message.answer("Товары не найдены.")
+            return
+
         # Отправка найденных товаров
         for product in products:
             if product.image:
-                await message.answer_photo(
+                await callback.message.answer_photo(
                     product.image,
                     caption=(
                         f"<b>{product.name}</b>\n"
@@ -234,7 +301,7 @@ async def search_products(message: types.Message, session: AsyncSession, state: 
                     )
                 )
             else:
-                await message.answer(
+                await callback.message.answer(
                     text=(
                         f"<b>{product.name}</b>\n"
                         f"Артикул: {product.sku}\n"
@@ -249,12 +316,35 @@ async def search_products(message: types.Message, session: AsyncSession, state: 
                     )
                 )
 
-        await state.clear()
+        # Получаем общее количество товаров и страниц
+        total_pages = (total_count + 4) // 5  # Общее количество страниц
+        pagination_info = f"Найдено {total_count} товаров. Страница {page} из {total_pages}."
+
+        # Создаем кнопки пагинации
+        pagination_btns = []
+        if page > 1:
+            pagination_btns.append(InlineKeyboardButton(
+                text="◀ Пред.",
+                callback_data=f"search_{search_query}_{page - 1}"
+            ))
+        if page < total_pages:
+            pagination_btns.append(InlineKeyboardButton(
+                text="След. ▶",
+                callback_data=f"search_{search_query}_{page + 1}"
+            ))
+
+        if pagination_btns:
+            await callback.message.answer(
+                text=pagination_info,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[pagination_btns])
+            )
+
+        await callback.answer()
 
     except Exception as e:
-        # Логирование ошибки
-        print(f"Ошибка при выполнении запроса: {e}")
-        await message.answer("Произошла ошибка при загрузке товаров.")
+        print(f"Ошибка при пагинации: {e}")
+        await callback.answer("Произошла ошибка при загрузке товаров.")
+
 
 
 
