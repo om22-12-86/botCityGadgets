@@ -90,8 +90,9 @@ async def products(session: AsyncSession, level: int, category: int, page: int):
     # Получаем первый товар на странице
     product = page_products[0]
 
-    # Если у товара есть изображение, используем InputMediaPhoto
+    # Проверяем, есть ли изображение
     if product.image:
+        # Если изображение есть, используем InputMediaPhoto
         image = InputMediaPhoto(
             media=product.image,
             caption=(
@@ -106,7 +107,14 @@ async def products(session: AsyncSession, level: int, category: int, page: int):
         )
     else:
         # Если изображения нет, отправляем только описание товара
-        image = None  # В случае отсутствия изображения, мы не передаем InputMediaPhoto
+        image = (
+            f"<b>{product.name}</b>\n"
+            f"Артикул: {product.sku}\n"
+            f"{product.description}\n"
+            f"Стоимость: {round(product.price, 2)} ₽\n"
+            f"В наличии: {product.stock} шт.\n"
+            f"<b>Товар {paginator.page} из {paginator.pages}</b>"
+        )
 
     pagination_btns = pages(paginator)
     kbds = get_user_products_btns(
@@ -119,6 +127,7 @@ async def products(session: AsyncSession, level: int, category: int, page: int):
     )
 
     return image, kbds
+
 
 
 

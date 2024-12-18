@@ -219,57 +219,42 @@ async def orm_reduce_product_in_cart(session: AsyncSession, user_id: int, produc
         await session.commit()
 
 
+async def orm_get_products_by_keywords(session, keywords, page=1, per_page=5):
+    """
+    Выполняет поиск продуктов по ключевым словам с поддержкой пагинации.
 
-
-
-async def orm_get_products_by_keywords(session: AsyncSession, keywords: str, page: int = 1, per_page: int = 5):
-    """Поиск продуктов по точным словосочетаниям, ключевым словам и артикулу с пагинацией."""
-
-    # Разбиваем запрос на ключевые слова
+    :param session: активная сессия базы данных
+    :param keywords: строка ключевых слов
+    :param page: текущая страница
+    :param per_page: количество продуктов на странице
+    :return: кортеж (список продуктов, общее количество)
+    """
     keyword_list = keywords.split()
 
-    # Формируем запрос для поиска
-    if len(keyword_list) == 1:
-        # Если одно слово, это либо артикул, либо ключевое слово
-        query = select(Product).where(
-            or_(
-                Product.sku.ilike(f"%{keywords}%"),  # Поиск по артикулу
-                Product.name.ilike(f"%{keywords}%"),  # Поиск по имени товара
-                Product.description.ilike(f"%{keywords}%")  # Поиск по описанию товара
-            )
-        )
-    else:
-        # Если несколько слов, ищем полное совпадение в имени и описании
-        query = select(Product).where(
-            or_(
-                *[Product.name.ilike(f"%{keyword}%") for keyword in keyword_list],  # Поиск по имени товара
-                *[Product.description.ilike(f"%{keyword}%") for keyword in keyword_list],  # Поиск по описанию товара
-            )
-        )
+    # Формируем запрос на основе ключевых слов
+    conditions = []
+    for keyword in keyword_list:
+        conditions.extend([
+            Product.name.ilike(f"%{keyword}%"),
+            Product.description.ilike(f"%{keyword}%"),
+            Product.sku.ilike(f"%{keyword}%")
+        ])
 
-    # Пагинация
-    offset = (page - 1) * per_page
-    query = query.offset(offset).limit(per_page)
+    query = select(Product).where(or_(*conditions)).offset((page - 1) * per_page).limit(per_page)
 
     try:
         result = await session.execute(query)
-        products = result.scalars().all()  # Получаем все найденные продукты
+        products = result.scalars().all()
     except Exception as e:
         print(f"Ошибка при выполнении запроса: {e}")
-        return [], 0  # Возвращаем пустой список и 0 товаров в случае ошибки
+        return [], 0
 
-    # Получаем общее количество товаров для правильной пагинации
-    count_query = select(func.count(Product.id)).where(
-        or_(
-            *[Product.name.ilike(f"%{keyword}%") for keyword in keyword_list],  # Поиск по имени товара
-            *[Product.description.ilike(f"%{keyword}%") for keyword in keyword_list],  # Поиск по описанию товара
-            *[Product.sku.ilike(f"%{keyword}%") for keyword in keyword_list]  # Поиск по артикулу
-        )
-    )
+    # Общее количество найденных продуктов
+    count_query = select(func.count(Product.id)).where(or_(*conditions))
 
     try:
         total_count_result = await session.execute(count_query)
-        total_count = total_count_result.scalar()  # Общее количество найденных товаров
+        total_count = total_count_result.scalar()
     except Exception as e:
         print(f"Ошибка при подсчете общего числа товаров: {e}")
         total_count = 0

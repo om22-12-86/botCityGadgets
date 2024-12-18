@@ -126,12 +126,27 @@ async def add_to_cart(callback: types.CallbackQuery, callback_data: MenuCallBack
         )
         await session.commit()  # Сохраняем изменения после добавления пользователя
 
+    # Проверка наличия фото у продукта
+    result = await session.execute(select(Product).where(Product.id == callback_data.product_id))
+    product = result.scalar()
+    if not product:
+        await callback.answer("Товар не найден.")
+        return
+
+    # Проверяем наличие фото у товара
+    if not product.image:
+        media = types.InputMediaPhoto(media="DEFAULT_IMAGE_URL", caption=product.name)  # Стандартное изображение для товаров без фото
+    else:
+        media = types.InputMediaPhoto(media=product.image, caption=product.name)
+
     # Добавляем товар в корзину пользователя
     await orm_add_to_cart(session, user_id=user.id, product_id=callback_data.product_id)
+    await callback.message.edit_media(media=media, reply_markup=callback.message.reply_markup)
     await callback.answer("Товар добавлен в корзину.")
 
 
-# Основной обработчик callback-запросов
+
+
 # Основной обработчик callback-запросов
 @user_private_router.callback_query(MenuCallBack.filter())
 async def user_menu(callback: types.CallbackQuery, callback_data: MenuCallBack, session: AsyncSession, state: FSMContext):
@@ -161,6 +176,12 @@ async def user_menu(callback: types.CallbackQuery, callback_data: MenuCallBack, 
         user_id=callback.from_user.id,
     )
 
+    # Проверка наличия данных для отправки
+    if media:  # Проверяем, есть ли текст или медиа для отправки
+        text_to_send = media  # Если есть текст, используем его
+    else:
+        text_to_send = "Нет данных для отображения"  # Если нет текста, отправляем заглушку
+
     # Проверка на изменение содержимого
     if isinstance(media, types.InputMediaPhoto):
         # Если изображение есть
@@ -176,12 +197,14 @@ async def user_menu(callback: types.CallbackQuery, callback_data: MenuCallBack, 
             await callback.answer("Контент не изменился.")
             return
         # Обновляем только текст, без изображений
-        await callback.message.edit_text(text=media, reply_markup=reply_markup)
+        await callback.message.edit_text(text=text_to_send, reply_markup=reply_markup)
 
     else:
         await callback.message.answer("Произошла ошибка при загрузке контента.")
 
     await callback.answer()
+
+
 
 
 
@@ -221,14 +244,14 @@ async def search_products(message: types.Message, session: AsyncSession, state: 
         total_pages = (total_count + per_page - 1) // per_page  # Количество страниц
         pagination_info = f"Найдено {total_count} товаров. Страница {page} из {total_pages}."
 
-        # Отправка найденных товаров
+        # Отправка найденных товаров с кнопками
         for product in products:
             caption = (
                 f"<b>{product.name}</b>\n"
-                f"<b>{product.sku}</b>\n"
+                f"Артикул: {product.sku}\n"
                 f"{product.description}\n"
-                f"Стоимость: {round(product.price, 2)} ₽\n"
-                f"В наличии: {product.stock} шт."
+                f"Цена: {round(product.price, 2)} ₽\n"
+                f"В наличии: {product.stock} шт.\n"
             )
 
             if product.image:
@@ -236,26 +259,33 @@ async def search_products(message: types.Message, session: AsyncSession, state: 
                     product.image,
                     caption=caption,
                     parse_mode='HTML',
+                    reply_markup=get_user_products_btns(
+                        product_id=product.id,
+                        category_id=product.category_id
+                    )
                 )
             else:
                 await message.answer(
                     text=caption,
                     parse_mode='HTML',
+                    reply_markup=get_user_products_btns(
+                        product_id=product.id,
+                        category_id=product.category_id
+                    )
                 )
 
         # Кнопки пагинации
-        pagination_btns = {}
-        if page > 1:
-            pagination_btns["◀ Пред."] = f"search_{search_query}_{page - 1}"
+        pagination_btns = []
         if page < total_pages:
-            pagination_btns["След. ▶"] = f"search_{search_query}_{page + 1}"
+            pagination_btns.append(InlineKeyboardButton(
+                text="След. ▶",
+                callback_data=f"search_{search_query}_{page + 1}"
+            ))
 
         if pagination_btns:
             await message.answer(
                 text=pagination_info,
-                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text=text, callback_data=callback_data) for text, callback_data in pagination_btns.items()]
-                ])
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[pagination_btns])
             )
 
         await state.clear()
@@ -263,6 +293,7 @@ async def search_products(message: types.Message, session: AsyncSession, state: 
     except Exception as e:
         print(f"Ошибка при выполнении запроса: {e}")
         await message.answer("Произошла ошибка при загрузке товаров.")
+
 
 
 
