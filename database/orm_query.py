@@ -221,45 +221,54 @@ async def orm_reduce_product_in_cart(session: AsyncSession, user_id: int, produc
 
 async def orm_get_products_by_keywords(session, keywords, page=1, per_page=5):
     """
-    Выполняет поиск продуктов по ключевым словам с поддержкой пагинации.
+    Выполняет поиск продуктов по точным словосочетаниям с поддержкой пагинации.
 
     :param session: активная сессия базы данных
-    :param keywords: строка ключевых слов
+    :param keywords: строка ключевых слов или словосочетаний
     :param page: текущая страница
     :param per_page: количество продуктов на странице
     :return: кортеж (список продуктов, общее количество)
     """
-    keyword_list = keywords.split()
+    # Убираем лишние пробелы и проверяем наличие ключевых слов
+    search_phrase = keywords.strip()
+    if not search_phrase:
+        return [], 0
 
-    # Формируем запрос на основе ключевых слов
-    conditions = []
-    for keyword in keyword_list:
-        conditions.extend([
-            Product.name.ilike(f"%{keyword}%"),
-            Product.description.ilike(f"%{keyword}%"),
-            Product.sku.ilike(f"%{keyword}%")
-        ])
+    # Формируем условия поиска по точному словосочетанию
+    conditions = [
+        Product.name.ilike(f"%{search_phrase}%"),
+        Product.description.ilike(f"%{search_phrase}%"),
+        Product.sku.ilike(f"%{search_phrase}%")
+    ]
 
-    query = select(Product).where(or_(*conditions)).offset((page - 1) * per_page).limit(per_page)
+    # Основной запрос для выборки продуктов
+    query = (
+        select(Product)
+        .where(or_(*conditions))
+        .offset((page - 1) * per_page)
+        .limit(per_page)
+    )
 
     try:
+        # Выполняем запрос и получаем список продуктов
         result = await session.execute(query)
         products = result.scalars().all()
     except Exception as e:
         print(f"Ошибка при выполнении запроса: {e}")
         return [], 0
 
-    # Общее количество найденных продуктов
+    # Запрос для подсчёта общего количества продуктов
     count_query = select(func.count(Product.id)).where(or_(*conditions))
 
     try:
         total_count_result = await session.execute(count_query)
         total_count = total_count_result.scalar()
     except Exception as e:
-        print(f"Ошибка при подсчете общего числа товаров: {e}")
+        print(f"Ошибка при подсчёте общего числа товаров: {e}")
         total_count = 0
 
     return products, total_count
+
 
 
 async def orm_get_user_orders(session: AsyncSession, user_id: int):
