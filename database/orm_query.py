@@ -14,7 +14,7 @@ from database.models import Banner, Cart, Category, Product, User, Order, OrderI
 import logging
 import pandas as pd
 import os
-import requests
+
 
 
 logging.basicConfig(level=logging.INFO)
@@ -220,35 +220,6 @@ async def orm_reduce_product_in_cart(session: AsyncSession, user_id: int, produc
         product.stock += 1
         await session.commit()
 
-
-
-# Функция расчета стоимости доставки
-async def calculate_delivery_cost(city: str, weight: int = 1000) -> float:
-    auth_url = "https://api.cdek.ru/v2/oauth/token"
-    auth_data = {
-        "grant_type": "client_credentials",
-        "client_id": "wqGwiQx0gg8mLtiEKsUinjVSICCjtTEP",
-        "client_secret": "RmAmgvSgSl1yirlz9QupbzOJVqhCxcP5"
-    }
-    auth_response = requests.post(auth_url, json=auth_data)
-    print(auth_response.json())
-    token = auth_response.json().get("access_token")
-
-    location_url = f"https://api.cdek.ru/v2/location/cities?city={city}"
-    headers = {"Authorization": f"Bearer {token}"}
-    location_response = requests.get(location_url, headers=headers)
-    print(location_response.json())
-    city_code = location_response.json()[0]["code"]
-
-    delivery_url = "https://api.cdek.ru/v2/calculator/tariff"
-    delivery_data = {
-        "tariff_code": 10,
-        "from_location": {"code": 270},  # Код города отправки
-        "to_location": {"code": city_code},  # Код города доставки
-        "packages": [{"weight": weight, "length": 10, "width": 10, "height": 10}]
-    }
-    delivery_response = requests.post(delivery_url, json=delivery_data, headers=headers)
-    return delivery_response.json().get("total_sum")
 
 
 
