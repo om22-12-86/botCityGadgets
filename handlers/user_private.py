@@ -1,19 +1,18 @@
 from aiogram import F, types, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import CommandStart, StateFilter
 from aiogram.filters import Command
 from aiogram.fsm.state import StatesGroup, State
 from sqlalchemy import select
 from database.models import Banner, Cart, Category, Product, User
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
-from database.orm_query import orm_add_to_cart, orm_add_user, orm_get_products_by_keywords, orm_get_products, orm_get_user_carts, create_order_from_cart, get_user_orders, display_orders_to_user
+from database.orm_query import orm_add_to_cart, orm_add_user, orm_get_products_by_keywords, orm_get_products, orm_get_user_carts, create_order_from_cart, get_user_orders, display_orders_to_user, calculate_delivery_cost
 from filters.chat_types import ChatTypeFilter
 from handlers.menu_processing import get_menu_content, carts# Импортируем функции
 from kbds.inline import MenuCallBack, get_product_buttons, get_user_products_btns
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from utils.paginator import Paginator
 from aiogram import Bot
-
 
 
 
@@ -143,6 +142,70 @@ async def add_to_cart(callback: types.CallbackQuery, callback_data: MenuCallBack
     await orm_add_to_cart(session, user_id=user.id, product_id=callback_data.product_id)
     await callback.message.edit_media(media=media, reply_markup=callback.message.reply_markup)
     await callback.answer("Товар добавлен в корзину.")
+
+
+
+# СДЭК выбор города
+@user_private_router.callback_query(F.data == "delivery")
+async def handle_delivery(callback: CallbackQuery, state: FSMContext):
+    await state.set_state("awaiting_city")  # Устанавливаем состояние
+    await callback.message.answer("Введите город доставки для расчета стоимости через СДЭК.")
+
+
+# Обработчик для ввода города и обновления стоимости корзины
+@user_private_router.message(StateFilter("awaiting_city"))
+async def process_delivery_city(message: types.Message, state: FSMContext, session: AsyncSession):
+    city = message.text
+    try:
+        # Рассчитать стоимость доставки
+        delivery_cost = await calculate_delivery_cost(city)
+        await state.update_data(delivery_cost=delivery_cost, city=city)
+
+        # Получить стоимость товаров в корзине
+        carts = await orm_get_user_carts(session, message.from_user.id)
+        total_cost = sum(item.product.price * item.stock for item in carts)
+        total_cost_with_delivery = total_cost + delivery_cost
+
+        # Отправить выбор пользователю
+        keyboard = InlineKeyboardBuilder()
+        keyboard.add(
+            InlineKeyboardButton(text="Добавить доставку в заказ ✅", callback_data="confirm_delivery"),
+            InlineKeyboardButton(text="Изменить город ❌", callback_data="change_city")
+        )
+        await message.answer(
+            f"Стоимость доставки в {city}: {delivery_cost} ₽\n"
+            f"Итоговая сумма с доставкой: {total_cost_with_delivery} ₽.\n\n"
+            "Вы можете подтвердить доставку или выбрать другой город.",
+            reply_markup=keyboard.as_markup()
+        )
+    except Exception as e:
+        await message.answer("Ошибка при расчете доставки. Попробуйте еще раз.")
+        print(f"Ошибка API СДЭК: {e}")
+    finally:
+        await state.set_state("awaiting_delivery_action")  # Новое состояние для выбора действия
+
+
+# Обработчик подтверждения или изменения города
+@user_private_router.callback_query(StateFilter("awaiting_delivery_action"))
+async def handle_delivery_action(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    if callback.data == "confirm_delivery":
+        # Подтвердить доставку и обновить корзину
+        data = await state.get_data()
+        delivery_cost = data.get("delivery_cost", 0)
+        city = data.get("city", "не указан")
+        carts = await orm_get_user_carts(session, callback.from_user.id)
+        total_cost = sum(item.product.price * item.stock for item in carts)
+        total_cost_with_delivery = total_cost + delivery_cost
+
+        await callback.message.answer(
+            f"Доставка в {city} добавлена к заказу.\n"
+            f"Итоговая сумма с доставкой: {total_cost_with_delivery} ₽."
+        )
+        await state.clear()  # Очистить состояние
+    elif callback.data == "change_city":
+        # Вернуться к выбору города
+        await state.set_state("awaiting_city")
+        await callback.message.answer("Введите другой город для расчета доставки.")
 
 
 
