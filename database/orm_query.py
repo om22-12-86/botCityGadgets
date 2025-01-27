@@ -12,6 +12,7 @@ from decimal import Decimal
 from datetime import datetime
 from database.models import Banner, Cart, Category, Product, User, Order, OrderItem, OrderHistory
 import logging
+from urllib.parse import unquote
 import pandas as pd
 import os
 
@@ -225,17 +226,21 @@ async def orm_reduce_product_in_cart(session: AsyncSession, user_id: int, produc
 
 
 
-
-async def orm_get_products_by_keywords(session, keywords, page=1, per_page=5):
+async def orm_get_products_by_keywords(session, keywords, page=1, per_page=5, refresh=False):
     """
     Выполняет поиск продуктов по точным словосочетаниям с поддержкой пагинации.
 
-    :param session: активная сессия базы данных
-    :param keywords: строка ключевых слов или словосочетаний
-    :param page: текущая страница
-    :param per_page: количество продуктов на странице
-    :return: кортеж (список продуктов, общее количество)
+    :param session: Активная сессия базы данных
+    :param keywords: Строка ключевых слов или словосочетаний
+    :param page: Номер текущей страницы (по умолчанию 1)
+    :param per_page: Количество продуктов на странице (по умолчанию 5)
+    :param refresh: Указывает, нужно ли откатить незавершённые транзакции (по умолчанию False)
+    :return: Кортеж (список продуктов, общее количество)
     """
+    # Очищаем кэш сессии при необходимости
+    if refresh:
+        await session.rollback()
+
     # Убираем лишние пробелы и проверяем наличие ключевых слов
     search_phrase = keywords.strip()
     if not search_phrase:
@@ -248,34 +253,32 @@ async def orm_get_products_by_keywords(session, keywords, page=1, per_page=5):
         Product.sku.ilike(f"%{search_phrase}%")
     ]
 
+    # Рассчитываем смещение для пагинации
+    offset = (page - 1) * per_page
+
     # Основной запрос для выборки продуктов
     query = (
         select(Product)
         .where(or_(*conditions))
-        .offset((page - 1) * per_page)
+        .offset(offset)
         .limit(per_page)
     )
-
-    try:
-        # Выполняем запрос и получаем список продуктов
-        result = await session.execute(query)
-        products = result.scalars().all()
-    except Exception as e:
-        print(f"Ошибка при выполнении запроса: {e}")
-        return [], 0
 
     # Запрос для подсчёта общего количества продуктов
     count_query = select(func.count(Product.id)).where(or_(*conditions))
 
     try:
+        # Выполняем запросы для продуктов и общего количества
+        products_result = await session.execute(query)
         total_count_result = await session.execute(count_query)
+
+        products = products_result.scalars().all()
         total_count = total_count_result.scalar()
     except Exception as e:
-        print(f"Ошибка при подсчёте общего числа товаров: {e}")
-        total_count = 0
+        print(f"Ошибка при выполнении запросов: {e}")
+        return [], 0
 
     return products, total_count
-
 
 
 async def orm_get_user_orders(session: AsyncSession, user_id: int):

@@ -78,11 +78,14 @@ class Order(Base):
     order_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     status: Mapped[str] = mapped_column(String(20), default='В обработке')
     total_cost: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    is_paid: Mapped[bool] = mapped_column(Boolean, default=False)  # Новый флаг оплаты
+    receipt_url: Mapped[str] = mapped_column(String(255), nullable=True)  # URL чека
     created: Mapped[DateTime] = mapped_column(DateTime, default=func.now())
     updated: Mapped[DateTime] = mapped_column(DateTime, default=func.now(), onupdate=func.now())
 
     user: Mapped["User"] = relationship("User", back_populates="orders")
     items: Mapped[list["OrderItem"]] = relationship("OrderItem", back_populates="order", cascade="all, delete-orphan")
+
 
 class OrderItem(Base):
     __tablename__ = 'order_item'

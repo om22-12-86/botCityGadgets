@@ -1,4 +1,4 @@
-FROM python:3.10-slim
+FROM python:3.10
 
 # Устанавливаем зависимости для сборки psycopg2
 RUN apt-get update && apt-get install -y \
@@ -12,7 +12,7 @@ WORKDIR /bot
 COPY . /bot
 
 # Устанавливаем зависимости
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --timeout=120 -r requirements.txt
 
 # Указываем команду для запуска бота
 CMD ["python", "app.py"]

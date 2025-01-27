@@ -10,6 +10,7 @@ from sqlalchemy.future import select
 from database.engine import SessionLocal
 from database.models import Order, User, OrderHistory, Category
 import logging
+from urllib.parse import quote, unquote
 import pandas as pd
 import os
 
@@ -552,6 +553,10 @@ async def admin_start_search(callback: types.CallbackQuery, state: FSMContext):
     await state.set_state(AdminSearchProduct.keywords)
 
 
+
+
+
+
 # Обработка ввода ключевых слов для поиска
 @admin_router.message(AdminSearchProduct.keywords, F.text)
 async def admin_search_products(message: types.Message, session: AsyncSession, state: FSMContext):
@@ -645,6 +650,97 @@ async def admin_search_products(message: types.Message, session: AsyncSession, s
     except Exception as e:
         print(f"Ошибка при выполнении запроса: {e}")
         await message.answer("Произошла ошибка при загрузке товаров.")
+
+
+
+
+@admin_router.callback_query(F.data.startswith('admin_search_'))
+async def admin_pagination(callback: types.CallbackQuery, session: AsyncSession):
+    try:
+        # Разбор callback_data
+        data = callback.data.split('_')
+        search_query = unquote('_'.join(data[2:-1]))  # Извлекаем и декодируем поисковый запрос
+        page = int(data[-1])  # Текущая страница
+        per_page = 5  # Количество товаров на странице
+
+        # Получаем товары и общее количество
+        products, total_count = await orm_get_products_by_keywords(session, search_query, page, per_page)
+
+        if not products:
+            await callback.message.edit_text("Товары не найдены.")
+            return
+
+        # Пагинация
+        total_pages = (total_count + per_page - 1) // per_page
+        pagination_info = f"Найдено {total_count} товаров. Страница {page} из {total_pages}."
+
+        # Отправка товаров (как в основном хендлере)
+        for product in products:
+            caption = (
+                f"<b>{product.name}</b>\n"
+                f"<b>{product.sku}</b>\n"
+                f"{product.description}\n"
+                f"Стоимость: {round(product.price, 2)} ₽\n"
+                f"В наличии: {product.stock} шт."
+            )
+            if product.image:
+                try:
+                    await callback.message.answer_photo(
+                        product.image,
+                        caption=caption,
+                        parse_mode='HTML',
+                        reply_markup=get_callback_btns(
+                            btns={
+                                "Удалить": f"admin_delete_{product.id}",
+                                "Изменить": f"admin_change_{product.id}",
+                            },
+                            sizes=(2,)
+                        )
+                    )
+                except Exception as e:
+                    print(f"Ошибка при отправке изображения: {e}")
+                    await callback.message.answer(
+                        text=caption,
+                        parse_mode='HTML',
+                        reply_markup=get_callback_btns(
+                            btns={
+                                "Удалить": f"admin_delete_{product.id}",
+                                "Изменить": f"admin_change_{product.id}",
+                            },
+                            sizes=(2,)
+                        )
+                    )
+            else:
+                await callback.message.answer(
+                    text=caption,
+                    parse_mode='HTML',
+                    reply_markup=get_callback_btns(
+                        btns={
+                            "Удалить": f"admin_delete_{product.id}",
+                            "Изменить": f"admin_change_{product.id}",
+                        },
+                        sizes=(2,)
+                    )
+                )
+
+        # Кнопки пагинации
+        pagination_btns = {}
+        if page > 1:
+            pagination_btns["◀ Пред."] = f"admin_search_{quote(search_query)}_{page - 1}"
+        if page < total_pages:
+            pagination_btns["След. ▶"] = f"admin_search_{quote(search_query)}_{page + 1}"
+
+        if pagination_btns:
+            await callback.message.answer(
+                text=pagination_info,
+                reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text=text, callback_data=callback_data) for text, callback_data in pagination_btns.items()]
+                ])
+            )
+
+    except Exception as e:
+        print(f"Ошибка при обработке пагинации: {e}")
+        await callback.message.answer("Произошла ошибка при загрузке данных.")
 
 
 
@@ -897,15 +993,22 @@ async def handle_orders(message: types.Message, session: AsyncSession):
 
     # Для каждого заказа создаем кнопки
     for order in orders:
-        # Кнопка для изменения статуса заказа
+        # Кнопки для изменения статуса заказа
         buttons = [
             InlineKeyboardButton("Изменить статус", callback_data=f"change_status_{order.id}")
         ]
+
+        # Если заказ неоплачен, добавляем кнопку "Оплатить онлайн"
+        if not order.is_paid:
+            buttons.append(InlineKeyboardButton("Оплатить онлайн 💳", callback_data=f"pay_order_{order.id}"))
+
+        # Создаем клавиатуру
         keyboard = InlineKeyboardMarkup(row_width=1).add(*buttons)
 
         # Отправляем информацию о заказе с клавиатурой
         await message.answer(f"Заказ #{order.id} от пользователя {order.user_id}\nСтатус: {order.status}",
                              reply_markup=keyboard)
+
 
 
 

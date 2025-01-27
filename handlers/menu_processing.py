@@ -1,5 +1,7 @@
 from aiogram.types import InputMediaPhoto, InlineKeyboardMarkup, InlineKeyboardButton
 from sqlalchemy.ext.asyncio import AsyncSession
+from urllib.parse import quote, unquote
+
 
 # Импортируем необходимые функции для работы с базой данных из orm_query
 from database.orm_query import (
