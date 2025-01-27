@@ -3,7 +3,8 @@ FROM python:3.10
 # Устанавливаем зависимости для сборки psycopg2
 RUN apt-get update && apt-get install -y \
     libpq-dev \
-    build-essential
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*  # Чтобы уменьшить размер образа
 
 # Устанавливаем рабочую директорию
 WORKDIR /bot
