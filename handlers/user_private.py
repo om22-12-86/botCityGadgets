@@ -3,6 +3,7 @@ from aiogram.filters import CommandStart, StateFilter
 from aiogram.filters import Command
 from aiogram.fsm.state import StatesGroup, State
 from sqlalchemy import select
+from aiogram.exceptions import TelegramBadRequest
 from database.models import Banner, Cart, Category, Product, User
 from aiogram.fsm.context import FSMContext
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -201,7 +202,10 @@ async def user_menu(callback: types.CallbackQuery, callback_data: MenuCallBack, 
             await callback.answer("Контент не изменился.")
             return
         # Обновляем только текст, без изображений
-        await callback.message.edit_text(text=text_to_send, reply_markup=reply_markup)
+        try:
+            await callback.message.edit_text(text=text_to_send, reply_markup=reply_markup)
+        except TelegramBadRequest:
+            await callback.message.answer(text_to_send, reply_markup=reply_markup)
 
     else:
         await callback.message.answer("Произошла ошибка при загрузке контента.")
